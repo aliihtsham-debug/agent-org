@@ -178,7 +178,7 @@ const MODEL_MAP: Record<AgentRole, string> = {
 
 ```bash
 # 1. Clone the repository
-git clone <your-repo-url>
+git clone (https://github.com/aliihtsham-debug/agent-org)
 cd agent-org
 
 # 2. Install dependencies
