@@ -1,6 +1,7 @@
 import type { AgentResult } from "../types/agent-types.js";
 import { runAgentWithRetry, type AgentContext } from "./base-agent.js";
-import { runAllICAgents } from "./ic-agents.js";
+import { runEngManagerAgent } from "./eng-manager-agent.js";
+import { runQAManagerAgent } from "./qa-manager-agent.js";
 
 export async function runCTOAgent(
   idea: string,
@@ -27,35 +28,40 @@ export async function runCTOAgent(
   );
   const archSummary = archContent?.slice(0, 2000) ?? archResult.summary;
 
-  // Step 3: Spawn all IC agents in parallel with architecture context
-  // IC agents don't need web tools — they get architecture + product context
-  const icCtx: AgentContext = { ...ctx, parentRole: "cto", enableWebTools: false };
-  const icResults = await runAllICAgents(
-    idea,
-    icCtx,
-    archSummary,
-    "", // PM hasn't run yet at this point — CEO merges results
-  );
+  // Step 3: Spawn Engineering Manager + QA Manager in parallel
+  const mgrCtx: AgentContext = { ...ctx, parentRole: "cto", enableWebTools: false };
+  const [engMgrResult, qaMgrResult] = await Promise.all([
+    runEngManagerAgent(idea, mgrCtx, archSummary, ""),
+    runQAManagerAgent(idea, mgrCtx, archSummary, ""),
+  ]);
 
-  // Step 4: Aggregate IC results into a unified technical summary
+  // Step 4: Collect IC results from both managers
+  const icResults: AgentResult[] = [
+    ...(engMgrResult.icResults ?? []),
+    ...(qaMgrResult.icResults ?? []),
+  ];
+
   const failedICs = icResults.filter((r) => r.status === "failed");
   const succeededICs = icResults.filter((r) => r.status === "completed");
+  const managerFailed = engMgrResult.status === "failed" || qaMgrResult.status === "failed";
 
-  const totalTokens = icResults.reduce(
-    (sum, r) => sum + r.tokenUsage.input + r.tokenUsage.output,
-    archResult.tokenUsage.input + archResult.tokenUsage.output,
-  );
+  const totalTokens =
+    archResult.tokenUsage.input + archResult.tokenUsage.output +
+    engMgrResult.tokenUsage.input + engMgrResult.tokenUsage.output +
+    qaMgrResult.tokenUsage.input + qaMgrResult.tokenUsage.output;
 
   const allArtifacts = [
     ...archResult.artifacts,
+    ...engMgrResult.artifacts,
+    ...qaMgrResult.artifacts,
     ...succeededICs.flatMap((r) => r.artifacts),
   ];
 
-  const summary = `Architecture + ${succeededICs.length}/5 IC agents completed. ${failedICs.length > 0 ? `Failed: ${failedICs.map((r) => r.role).join(", ")}` : ""}`;
+  const summary = `Architecture + ${succeededICs.length}/${icResults.length} IC agents completed via 2 managers. ${failedICs.length > 0 ? `Failed: ${failedICs.map((r) => r.role).join(", ")}` : ""}`;
 
   return {
     role: "cto",
-    status: failedICs.length > 0 ? "partial" : "completed",
+    status: managerFailed || failedICs.length > 0 ? "partial" : "completed",
     outputPath: archResult.outputPath,
     summary,
     artifacts: allArtifacts,
@@ -63,7 +69,8 @@ export async function runCTOAgent(
       input: Math.floor(totalTokens * 0.6),
       output: Math.floor(totalTokens * 0.4),
     },
-    durationMs: archResult.durationMs + Math.max(...icResults.map((r) => r.durationMs)),
+    durationMs: archResult.durationMs + Math.max(engMgrResult.durationMs, qaMgrResult.durationMs),
     error: failedICs.length > 0 ? `IC failures: ${failedICs.map((r) => r.role).join(", ")}` : undefined,
+    icResults,
   };
 }

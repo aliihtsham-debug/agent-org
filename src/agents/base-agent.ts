@@ -8,7 +8,7 @@ import { webSearch, webFetch } from "../tools/web-tools.js";
 // OpenRouter model IDs — uses free-tier models on OpenRouter (OWL / openrouter/auto)
 // Format: "openrouter/<provider>/<model>" or alias "openrouter/auto" for OWL router
 const MODEL_MAP: Record<AgentRole, string> = {
-  ceo: "openrouter/auto",        // OWL routes to best available model
+  ceo: "openrouter/auto",
   cto: "openrouter/auto",
   pm: "openrouter/auto",
   "frontend-engineer": "openrouter/auto",
@@ -16,19 +16,59 @@ const MODEL_MAP: Record<AgentRole, string> = {
   "testing-agent": "openrouter/auto",
   "security-auditor": "openrouter/auto",
   "devops-agent": "openrouter/auto",
+  // Management layer
+  "engineering-manager": "openrouter/auto",
+  "qa-manager": "openrouter/auto",
+  "ai-engineer": "openrouter/auto",
+  "performance-agent": "openrouter/auto",
+  // CISO branch
+  ciso: "openrouter/auto",
+  "vuln-scanner": "openrouter/auto",
+  "compliance-agent": "openrouter/auto",
+  // CFO branch
+  cfo: "openrouter/auto",
+  "budget-agent": "openrouter/auto",
+  "pricing-agent": "openrouter/auto",
+  // COO branch
+  coo: "openrouter/auto",
+  "scheduler-agent": "openrouter/auto",
+  "workflow-agent": "openrouter/auto",
+  "monitoring-agent": "openrouter/auto",
 };
 
-// Per-agent max_tokens — orchestrators get more room for synthesis,
-// IC agents get enough for focused deliverables without over-generating.
+// Per-agent max_tokens — VP orchestrators get the most room for synthesis,
+// managers get a mid-range budget, IC agents get enough for focused deliverables.
 const MAX_TOKENS_MAP: Record<AgentRole, number> = {
+  // CEO
   ceo: 8192,
+  // VP-level orchestrators
   cto: 8192,
   pm: 8192,
+  ciso: 8192,
+  cfo: 8192,
+  coo: 8192,
+  // Manager-level orchestrators
+  "engineering-manager": 6000,
+  "qa-manager": 6000,
+  // Engineering ICs
   "frontend-engineer": 6000,
   "backend-engineer": 6000,
+  "ai-engineer": 6000,
+  "devops-agent": 6000,
+  // QA ICs
   "testing-agent": 5000,
+  "performance-agent": 5000,
+  // Security ICs
   "security-auditor": 5000,
-  "devops-agent": 5000,
+  "vuln-scanner": 5000,
+  "compliance-agent": 5000,
+  // Finance ICs
+  "budget-agent": 5000,
+  "pricing-agent": 5000,
+  // Operations ICs
+  "scheduler-agent": 5000,
+  "workflow-agent": 5000,
+  "monitoring-agent": 5000,
 };
 
 export interface AgentContext {

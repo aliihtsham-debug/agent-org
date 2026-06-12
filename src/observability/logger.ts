@@ -9,6 +9,24 @@ const ROLE_COLORS: Record<AgentRole, string> = {
   "testing-agent": "§C7",
   "security-auditor": "§C0",
   "devops-agent": "§6B",
+  // Management layer
+  "engineering-manager": "§D6",
+  "qa-manager": "§A9",
+  "ai-engineer": "§E9",
+  "performance-agent": "§EC",
+  // CISO branch
+  ciso: "§F0",
+  "vuln-scanner": "§E2",
+  "compliance-agent": "§DD",
+  // CFO branch
+  cfo: "§A0",
+  "budget-agent": "§8C",
+  "pricing-agent": "§6E",
+  // COO branch
+  coo: "§7A",
+  "scheduler-agent": "§89",
+  "workflow-agent": "§67",
+  "monitoring-agent": "§55",
 };
 
 const ROLE_LABELS: Record<AgentRole, string> = {
@@ -20,6 +38,24 @@ const ROLE_LABELS: Record<AgentRole, string> = {
   "testing-agent": "TEST",
   "security-auditor": "SEC",
   "devops-agent": "OPS",
+  // Management layer
+  "engineering-manager": "EM",
+  "qa-manager": "QA-M",
+  "ai-engineer": "AI",
+  "performance-agent": "PERF",
+  // CISO branch
+  ciso: "CISO",
+  "vuln-scanner": "VULN",
+  "compliance-agent": "COMP",
+  // CFO branch
+  cfo: "CFO",
+  "budget-agent": "BUDG",
+  "pricing-agent": "PRICE",
+  // COO branch
+  coo: "COO",
+  "scheduler-agent": "SCHED",
+  "workflow-agent": "FLOW",
+  "monitoring-agent": "MON",
 };
 
 export class AgentLogger {
@@ -41,8 +77,21 @@ export class AgentLogger {
   /** Determine the logical parent of a role for logging */
   getParentRole(child: AgentRole): AgentRole {
     if (child === "ceo") return "ceo";
-    if (child === "cto" || child === "pm") return "ceo";
-    return "cto"; // all IC agents report to CTO
+    // VP-level: report to CEO
+    if (child === "cto" || child === "pm" || child === "ciso" || child === "cfo" || child === "coo") return "ceo";
+    // Manager-level: report to their VP
+    if (child === "engineering-manager" || child === "qa-manager") return "cto";
+    // Engineering ICs: report to Engineering Manager
+    if (child === "frontend-engineer" || child === "backend-engineer" || child === "ai-engineer" || child === "devops-agent") return "engineering-manager";
+    // QA ICs: report to QA Manager
+    if (child === "testing-agent" || child === "performance-agent") return "qa-manager";
+    // Security ICs: report to CISO
+    if (child === "security-auditor" || child === "vuln-scanner" || child === "compliance-agent") return "ciso";
+    // Finance ICs: report to CFO
+    if (child === "budget-agent" || child === "pricing-agent") return "cfo";
+    // Operations ICs: report to COO
+    if (child === "scheduler-agent" || child === "workflow-agent" || child === "monitoring-agent") return "coo";
+    return "ceo"; // fallback
   }
 
   complete(role: AgentRole, summary: string): void {

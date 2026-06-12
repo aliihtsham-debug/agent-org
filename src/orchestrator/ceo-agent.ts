@@ -1,7 +1,11 @@
 import type { AgentResult, ProjectPlan } from "../types/agent-types.js";
+import { ROLE_OUTPUT_DIR } from "../types/agent-types.js";
 import { writeOutput } from "../tools/file-tools.js";
 import { runPMAgent } from "../agents/pm-agent.js";
 import { runCTOAgent } from "../agents/cto-agent.js";
+import { runCISOAgent } from "../agents/ciso-agent.js";
+import { runCFOAgent } from "../agents/cfo-agent.js";
+import { runCOOAgent } from "../agents/coo-agent.js";
 import type { AgentContext } from "../agents/base-agent.js";
 import { AgentLogger } from "../observability/logger.js";
 import { buildBranchName, commitAgentArtifacts } from "../tools/git-commit.js";
@@ -34,54 +38,42 @@ export async function runCEOAgent(options: CEOOptions): Promise<ProjectPlan> {
     enableWebTools: true,
   };
 
-  logger.info("CEO spawning PM + CTO in parallel…");
+  logger.info("CEO spawning 5 VPs in parallel: PM, CTO, CISO, CFO, COO…");
 
-  // Spawn PM and CTO in parallel
-  const [pmResult, ctoResult] = await Promise.all([
+  // Spawn all 5 VPs in parallel
+  const [pmResult, ctoResult, cisoResult, cfoResult, cooResult] = await Promise.all([
     runPMAgent(idea, ctx),
     runCTOAgent(idea, ctx),
+    runCISOAgent(idea, ctx),
+    runCFOAgent(idea, ctx),
+    runCOOAgent(idea, ctx),
   ]);
 
-  // Collect IC results from CTO's run
-  const icResults: AgentResult[] = [];
+  // Collect IC results from all VP branches (embedded by orchestrator agents)
+  const icResults: AgentResult[] = [
+    ...(ctoResult.icResults ?? []),
+    ...(cisoResult.icResults ?? []),
+    ...(cfoResult.icResults ?? []),
+    ...(cooResult.icResults ?? []),
+  ];
 
-  // IC agents run inside CTO — check the output dirs for their results
-  const icRoles = [
-    "frontend-engineer",
-    "backend-engineer",
-    "testing-agent",
-    "security-auditor",
-    "devops-agent",
-  ] as const;
-
-  for (const role of icRoles) {
-    const subdir =
-      role === "frontend-engineer" ? "code/frontend"
-      : role === "backend-engineer" ? "code/backend"
-      : role === "devops-agent" ? "code/devops"
-      : role === "testing-agent" ? "tests"
-      : "security";
-
-    const outputPath = `${outputBase}/${subdir}/${role}/output.md`;
-    const content = await ctx.readArtifact(outputPath);
-    if (content) {
-      icResults.push({
-        role,
-        status: "completed",
-        outputPath: `${outputBase}/${subdir}/${role}`,
-        summary: `${role} scaffold written`,
-        artifacts: [outputPath],
-        tokenUsage: { input: 0, output: 0 },
-        durationMs: 0,
-      });
+  // Fallback: verify each IC role's output exists on disk using shared ROLE_OUTPUT_DIR
+  for (const ic of icResults) {
+    const subdir = ROLE_OUTPUT_DIR[ic.role];
+    const diskPath = `${outputBase}/${subdir}/${ic.role}/output.md`;
+    if (!ic.artifacts.includes(diskPath)) {
+      const content = await ctx.readArtifact(diskPath);
+      if (content) {
+        ic.artifacts.push(diskPath);
+      }
     }
   }
 
   // Commit each agent's artifacts on role-specific branches
-  const agentsToCommit: { role: import("../types/agent-types.js").AgentRole; artifacts: string[]; summary: string }[] = [
-    { role: "pm", artifacts: pmResult.artifacts, summary: pmResult.summary },
-    { role: "cto", artifacts: ctoResult.artifacts, summary: ctoResult.summary },
-    ...icResults.map((ic) => ({ role: ic.role, artifacts: ic.artifacts, summary: ic.summary })),
+  const vpResults = [pmResult, ctoResult, cisoResult, cfoResult, cooResult];
+  const agentsToCommit = [
+    ...vpResults.map((r) => ({ role: r.role, artifacts: r.artifacts, summary: r.summary })),
+    ...icResults.map((r) => ({ role: r.role, artifacts: r.artifacts, summary: r.summary })),
   ];
 
   for (const { role, artifacts, summary } of agentsToCommit) {
@@ -92,19 +84,30 @@ export async function runCEOAgent(options: CEOOptions): Promise<ProjectPlan> {
 
   // Determine overall status
   const gaps: string[] = [];
-  if (pmResult.status === "failed") gaps.push("PM agent failed — no PRD produced");
-  if (ctoResult.status === "failed") gaps.push("CTO agent failed — no architecture produced");
-  if (pmResult.status === "partial") gaps.push("PM agent produced partial output");
-  if (ctoResult.status === "partial") gaps.push("CTO agent produced partial output");
+  const vpLabels: { result: AgentResult; label: string }[] = [
+    { result: pmResult, label: "PM" },
+    { result: ctoResult, label: "CTO" },
+    { result: cisoResult, label: "CISO" },
+    { result: cfoResult, label: "CFO" },
+    { result: cooResult, label: "COO" },
+  ];
+  for (const { result, label } of vpLabels) {
+    if (result.status === "failed") gaps.push(`${label} agent failed`);
+    if (result.status === "partial") gaps.push(`${label} agent produced partial output`);
+  }
 
-  const allFailed = pmResult.status === "failed" && ctoResult.status === "failed";
-  const anyFailed = pmResult.status === "failed" || ctoResult.status === "failed";
+  const allFailed = pmResult.status === "failed" && ctoResult.status === "failed" &&
+    cisoResult.status === "failed" && cfoResult.status === "failed" && cooResult.status === "failed";
+  const anyFailed = vpLabels.some(({ result }) => result.status === "failed");
 
   const plan: ProjectPlan = {
     idea,
     timestamp: new Date().toISOString(),
     pmResult,
     ctoResult,
+    cisoResult,
+    cfoResult,
+    cooResult,
     icResults,
     status: allFailed ? "failed" : anyFailed || gaps.length > 0 ? "partial" : "complete",
     gaps,
@@ -115,9 +118,10 @@ export async function runCEOAgent(options: CEOOptions): Promise<ProjectPlan> {
 
   // CEO summary output
   logger.banner(`CEO Summary — Status: ${plan.status.toUpperCase()}`);
-  logger.info(`PM: ${pmResult.summary} (${pmResult.status})`);
-  logger.info(`CTO: ${ctoResult.summary} (${ctoResult.status})`);
-  logger.info(`IC Agents: ${icResults.length}/${icRoles.length} completed`);
+  for (const { result, label } of vpLabels) {
+    logger.info(`${label}: ${result.summary} (${result.status})`);
+  }
+  logger.info(`IC Agents: ${icResults.length} completed across all branches`);
 
   if (gaps.length > 0) {
     logger.info("Gaps requiring human review:");
@@ -126,9 +130,10 @@ export async function runCEOAgent(options: CEOOptions): Promise<ProjectPlan> {
     }
   }
 
-  const totalTokens =
-    pmResult.tokenUsage.input + pmResult.tokenUsage.output +
-    ctoResult.tokenUsage.input + ctoResult.tokenUsage.output;
+  const totalTokens = vpResults.reduce(
+    (sum, r) => sum + r.tokenUsage.input + r.tokenUsage.output,
+    0,
+  );
 
   logger.info(`Total tokens: ~${totalTokens.toLocaleString()} (input+output)`);
   logger.info(`Total duration: ${(logger.getDuration() / 1000).toFixed(1)}s`);
@@ -145,6 +150,9 @@ async function writePlan(plan: ProjectPlan, outputBase: string): Promise<void> {
   );
 
   // Markdown plan for human reading
+  const vpRows = (label: string, result: AgentResult) =>
+    `| ${label} | ${result.status} | ${result.summary} | ${result.artifacts.join(", ") || "none"} |`;
+
   const md = `# Project Plan: ${plan.idea}
 
 **Generated:** ${plan.timestamp}
@@ -153,23 +161,21 @@ async function writePlan(plan: ProjectPlan, outputBase: string): Promise<void> {
 
 ---
 
-## Product Management
+## Executive Summary
 
-**Summary:** ${plan.pmResult.summary}
-**Status:** ${plan.pmResult.status}
-**Artifacts:** ${plan.pmResult.artifacts.join(", ") || "none"}
+| VP Branch | Status | Summary | Artifacts |
+|-----------|--------|---------|-----------|
+${vpRows("PM", plan.pmResult)}
+${vpRows("CTO", plan.ctoResult)}
+${vpRows("CISO", plan.cisoResult)}
+${vpRows("CFO", plan.cfoResult)}
+${vpRows("COO", plan.cooResult)}
 
-## Technical Architecture
-
-**Summary:** ${plan.ctoResult.summary}
-**Status:** ${plan.ctoResult.status}
-**Artifacts:** ${plan.ctoResult.artifacts.join(", ") || "none"}
-
-## Engineering Delivery
+## Engineering Delivery (All IC Agents)
 
 | Agent | Status | Summary |
 |-------|--------|---------|
-${plan.icResults.map((r) => `| ${r.role} | ${r.status} | ${r.summary} |`).join("\n")}
+${plan.icResults.map((r) => `| ${r.role} | ${r.status} | ${r.summary} |`).join("\n") || "| — | — | No IC results |"}
 
 ## Token Usage
 
@@ -177,12 +183,15 @@ ${plan.icResults.map((r) => `| ${r.role} | ${r.status} | ${r.summary} |`).join("
 |-------|-------|--------|
 | PM | ${plan.pmResult.tokenUsage.input.toLocaleString()} | ${plan.pmResult.tokenUsage.output.toLocaleString()} |
 | CTO | ${plan.ctoResult.tokenUsage.input.toLocaleString()} | ${plan.ctoResult.tokenUsage.output.toLocaleString()} |
+| CISO | ${plan.cisoResult.tokenUsage.input.toLocaleString()} | ${plan.cisoResult.tokenUsage.output.toLocaleString()} |
+| CFO | ${plan.cfoResult.tokenUsage.input.toLocaleString()} | ${plan.cfoResult.tokenUsage.output.toLocaleString()} |
+| COO | ${plan.cooResult.tokenUsage.input.toLocaleString()} | ${plan.cooResult.tokenUsage.output.toLocaleString()} |
 ${plan.icResults.map((r) => `| ${r.role} | ${r.tokenUsage.input.toLocaleString()} | ${r.tokenUsage.output.toLocaleString()} |`).join("\n")}
-| **Total** | **${(plan.pmResult.tokenUsage.input + plan.ctoResult.tokenUsage.input).toLocaleString()}** | **${(plan.pmResult.tokenUsage.output + plan.ctoResult.tokenUsage.output).toLocaleString()}** |
+| **Total (VPs)** | **${(plan.pmResult.tokenUsage.input + plan.ctoResult.tokenUsage.input + plan.cisoResult.tokenUsage.input + plan.cfoResult.tokenUsage.input + plan.cooResult.tokenUsage.input).toLocaleString()}** | **${(plan.pmResult.tokenUsage.output + plan.ctoResult.tokenUsage.output + plan.cisoResult.tokenUsage.output + plan.cfoResult.tokenUsage.output + plan.cooResult.tokenUsage.output).toLocaleString()}** |
 
 ---
 
-*Generated by Agent Org v0.1.0*
+*Generated by Agent Org v0.2.0*
 `;
 
   await writeOutput(`${outputBase}/project-plan.md`, md);
