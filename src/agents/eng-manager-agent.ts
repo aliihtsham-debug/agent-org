@@ -23,11 +23,9 @@ export async function runEngManagerAgent(
     return planResult;
   }
 
-  // Step 2: Read the plan for context
-  const planContent = await ctx.readArtifact(
-    `${planResult.outputPath}/output.md`,
-  );
-  const planSummary = planContent?.slice(0, 2000) ?? planResult.summary;
+  // Step 2: Publish and read plan from registry (no disk round-trip, no truncation)
+  ctx.resultsRegistry.publish(planResult);
+  const planSummary = ctx.resultsRegistry.getSummary("engineering-manager") ?? planResult.summary;
 
   // Step 3: Spawn all engineering ICs in parallel
   const icCtx: AgentContext = { ...ctx, parentRole: "engineering-manager", enableWebTools: false };

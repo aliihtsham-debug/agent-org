@@ -21,11 +21,9 @@ export async function runCOOAgent(
     return planResult;
   }
 
-  // Step 2: Read the plan for context
-  const planContent = await ctx.readArtifact(
-    `${planResult.outputPath}/output.md`,
-  );
-  const planSummary = planContent?.slice(0, 2000) ?? planResult.summary;
+  // Step 2: Publish and read plan from registry (no disk round-trip, no truncation)
+  ctx.resultsRegistry.publish(planResult);
+  const planSummary = ctx.resultsRegistry.getSummary("coo") ?? planResult.summary;
 
   // Step 3: Spawn operations ICs in parallel
   const icCtx: AgentContext = { ...ctx, parentRole: "coo", enableWebTools: false };

@@ -21,11 +21,9 @@ export async function runPMAgent(
     return overviewResult;
   }
 
-  // Step 2: Read the overview for context
-  const overviewContent = await ctx.readArtifact(
-    `${overviewResult.outputPath}/output.md`,
-  );
-  const overviewSummary = overviewContent?.slice(0, 2000) ?? overviewResult.summary;
+  // Step 2: Publish and read overview from registry (no disk round-trip, no truncation)
+  ctx.resultsRegistry.publish(overviewResult);
+  const overviewSummary = ctx.resultsRegistry.getSummary("pm") ?? overviewResult.summary;
 
   // Step 3: Spawn UX Researcher, Roadmap Agent, and Analytics Agent in parallel
   const icCtx: AgentContext = { ...ctx, parentRole: "pm", enableWebTools: false };

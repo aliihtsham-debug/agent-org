@@ -21,11 +21,9 @@ export async function runCISOAgent(
     return strategyResult;
   }
 
-  // Step 2: Read the strategy for context
-  const strategyContent = await ctx.readArtifact(
-    `${strategyResult.outputPath}/output.md`,
-  );
-  const strategySummary = strategyContent?.slice(0, 2000) ?? strategyResult.summary;
+  // Step 2: Publish and read strategy from registry (no disk round-trip, no truncation)
+  ctx.resultsRegistry.publish(strategyResult);
+  const strategySummary = ctx.resultsRegistry.getSummary("ciso") ?? strategyResult.summary;
 
   // Step 3: Spawn security ICs in parallel
   const icCtx: AgentContext = { ...ctx, parentRole: "ciso", enableWebTools: false };

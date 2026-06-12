@@ -22,11 +22,9 @@ export async function runCTOAgent(
     return archResult;
   }
 
-  // Step 2: Read the architecture output for context
-  const archContent = await ctx.readArtifact(
-    `${archResult.outputPath}/output.md`,
-  );
-  const archSummary = archContent?.slice(0, 2000) ?? archResult.summary;
+  // Step 2: Publish and read architecture from registry (no disk round-trip, no truncation)
+  ctx.resultsRegistry.publish(archResult);
+  const archSummary = ctx.resultsRegistry.getSummary("cto") ?? archResult.summary;
 
   // Step 3: Spawn Engineering Manager + QA Manager in parallel
   const mgrCtx: AgentContext = { ...ctx, parentRole: "cto", enableWebTools: false };

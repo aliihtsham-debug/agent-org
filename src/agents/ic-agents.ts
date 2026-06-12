@@ -133,7 +133,10 @@ export async function runICAgent(
   extraContext = "",
 ): Promise<AgentResult> {
   const task = createICTask(role, idea, architectureSummary, productSummary, ctx.outputBase, extraContext);
-  return runAgentWithRetry(task, ctx);
+  const result = await runAgentWithRetry(task, ctx);
+  // Publish to registry so sibling and cross-branch agents can access this result
+  ctx.resultsRegistry.publish(result);
+  return result;
 }
 
 // ── Branch-specific spawn functions ─────────────────────────────────────

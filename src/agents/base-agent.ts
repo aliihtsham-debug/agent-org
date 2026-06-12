@@ -4,6 +4,8 @@ import { getSystemPrompt } from "../prompts/agent-prompts.js";
 import { writeOutput, readFileIfExists, ensureDir } from "../tools/file-tools.js";
 import { AgentLogger } from "../observability/logger.js";
 import { webSearch, webFetch } from "../tools/web-tools.js";
+import type { AgentResultsRegistry } from "../communication/results-registry.js";
+import type { AgentMessageBus } from "../communication/message-bus.js";
 
 // OpenRouter model IDs — uses free-tier models on OpenRouter (OWL / openrouter/auto)
 // Format: "openrouter/<provider>/<model>" or alias "openrouter/auto" for OWL router
@@ -92,6 +94,10 @@ export interface AgentContext {
   projectRoot: string;
   /** Whether this agent should perform web research before its task */
   enableWebTools: boolean;
+  /** Shared results registry for direct agent-to-agent result access */
+  resultsRegistry: AgentResultsRegistry;
+  /** Message bus for sending direct messages to other agents */
+  messageBus: AgentMessageBus;
 }
 
 /**

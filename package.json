@@ -1,6 +1,6 @@
 {
   "name": "agent-org",
-  "version": "0.1.0",
+  "version": "0.5.0",
   "description": "Multi-agent orchestration system — CEO delegates to specialized sub-agents",
   "type": "module",
   "main": "dist/index.js",
