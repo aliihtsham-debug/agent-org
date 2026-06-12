@@ -7,8 +7,31 @@ dist/
 # Agent-generated outputs
 outputs/
 
+# Agent git branches (created by git-commit.ts)
+# Branches follow pattern: agent/<role>/<idea-slug>
+# These are local-only and should not be tracked
+agent-branches/
+
+# Git worktree artifacts (if any)
+.git/worktrees/
+
 # Environment variables
 .env
+
+# Claude Code
+.claude/
+CLAUDE.md
+
+# Skills
+.skills/
+skills/
+
+# Cursor
+.cursor/
+.cursorrules
+
+# Copilot
+.github/copilot-instructions.md
 
 # IDE / editor
 .vscode/

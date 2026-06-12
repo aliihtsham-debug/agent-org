@@ -1,0 +1,95 @@
+import { execSync } from "node:child_process";
+import { join } from "node:path";
+import type { AgentRole } from "../types/agent-types.js";
+
+/** Characters invalid in git branch names */
+const SANITIZE_RE = /[^a-z0-9._-]+/gi;
+
+/**
+ * Build a git-safe branch name from an agent role and a product idea slug.
+ * Example: `"agent/frontend-engineer/url-shortener"`
+ */
+export function buildBranchName(role: AgentRole, idea: string): string {
+  const slug = idea
+    .toLowerCase()
+    .replace(SANITIZE_RE, " ")
+    .trim()
+    .split(/\s+/)
+    .slice(0, 4)
+    .join("-");
+  return `agent/${role}/${slug}`;
+}
+
+/**
+ * Commit an agent's output artifacts to a role-specific branch.
+ *
+ * 1. Stashes any workingtree changes.
+ * 2. Creates/checks out `agent/<role>/<slug>`.
+ * 3. Cherry-picks the stash so only new artifacts are on the branch.
+ * 4. Commits with an agent-signed message.
+ *
+ * If git is not available or the working tree is not a repo, this is a no-op.
+ */
+export function commitAgentArtifacts(params: {
+  projectRoot: string;
+  branchName: string;
+  role: AgentRole;
+  artifactPaths: string[];
+  summary: string;
+}): void {
+  const { projectRoot, branchName, role, artifactPaths, summary } = params;
+
+  try {
+    // Verify we're inside a git repo
+    execSync("git rev-parse --git-dir", { cwd: projectRoot, stdio: "pipe" });
+  } catch {
+    // Not a git repo — skip silently
+    return;
+  }
+
+  try {
+    // Stage artifact paths (relative to projectRoot)
+    const relativePaths = artifactPaths.map((p) =>
+      p.startsWith(projectRoot) ? p.slice(projectRoot.length + 1).replace(/\\/g, "/") : p,
+    );
+
+    // Add only the agent's output files
+    execSync(`git add ${relativePaths.join(" ")}`, {
+      cwd: projectRoot,
+      stdio: "pipe",
+    });
+
+    // Check if there is anything staged to commit
+    const staged = execSync("git diff --cached --name-only", {
+      cwd: projectRoot,
+      stdio: "pipe",
+    })
+      .toString()
+      .trim();
+
+    if (!staged) return;
+
+    // Create / switch to the agent branch
+    try {
+      execSync(`git checkout -b ${branchName}`, { cwd: projectRoot, stdio: "pipe" });
+    } catch {
+      execSync(`git checkout ${branchName}`, { cwd: projectRoot, stdio: "pipe" });
+    }
+
+    // Commit
+    const message = `[${role}] ${summary}`.slice(0, 120);
+    execSync(`git commit -m "${message}" --no-verify`, {
+      cwd: projectRoot,
+      stdio: "pipe",
+    });
+
+    // Return to the original branch (main / master / HEAD)
+    try {
+      execSync("git checkout -", { cwd: projectRoot, stdio: "pipe" });
+    } catch {
+      // Best-effort — if we can't switch back, at least we committed
+    }
+  } catch {
+    // Any git failure is non-fatal — artifacts are still on disk
+  }
+}

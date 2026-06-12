@@ -28,7 +28,8 @@ export async function runCTOAgent(
   const archSummary = archContent?.slice(0, 2000) ?? archResult.summary;
 
   // Step 3: Spawn all IC agents in parallel with architecture context
-  const icCtx: AgentContext = { ...ctx, parentRole: "cto" };
+  // IC agents don't need web tools — they get architecture + product context
+  const icCtx: AgentContext = { ...ctx, parentRole: "cto", enableWebTools: false };
   const icResults = await runAllICAgents(
     idea,
     icCtx,

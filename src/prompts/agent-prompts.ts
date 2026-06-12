@@ -60,7 +60,7 @@ const PROMPTS: Record<AgentRole, PromptConfig> = {
       "Roadmap planning",
     ],
     inputExpectation:
-      "A product idea with context about the target market and business goals.",
+      "A product idea with context about the target market and business goals. Web research context may be provided if available.",
     outputFormat:
       "Product Requirements Document (PRD) in markdown containing: problem statement, target users, user stories with acceptance criteria, prioritized feature backlog (RICE scored), MVP scope definition, success metrics, and open questions.",
     constraints: [

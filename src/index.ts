@@ -64,7 +64,7 @@ async function main(): Promise<void> {
     process.exit(130);
   });
 
-  const plan = await runCEOAgent({ idea, apiKey, baseURL, outputBase, logger });
+  const plan = await runCEOAgent({ idea, apiKey, baseURL, outputBase, logger, projectRoot: PROJECT_ROOT });
 
   process.exit(plan.status === "failed" ? 1 : 0);
 }

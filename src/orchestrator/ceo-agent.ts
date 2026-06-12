@@ -4,6 +4,7 @@ import { runPMAgent } from "../agents/pm-agent.js";
 import { runCTOAgent } from "../agents/cto-agent.js";
 import type { AgentContext } from "../agents/base-agent.js";
 import { AgentLogger } from "../observability/logger.js";
+import { buildBranchName, commitAgentArtifacts } from "../tools/git-commit.js";
 
 export interface CEOOptions {
   idea: string;
@@ -11,10 +12,11 @@ export interface CEOOptions {
   baseURL: string;
   outputBase: string;
   logger: AgentLogger;
+  projectRoot: string;
 }
 
 export async function runCEOAgent(options: CEOOptions): Promise<ProjectPlan> {
-  const { idea, apiKey, baseURL, outputBase, logger } = options;
+  const { idea, apiKey, baseURL, outputBase, logger, projectRoot } = options;
 
   logger.banner(`Agent Org — Product Idea: "${idea}"`);
 
@@ -28,6 +30,8 @@ export async function runCEOAgent(options: CEOOptions): Promise<ProjectPlan> {
       const { readFileIfExists } = await import("../tools/file-tools.js");
       return readFileIfExists(path);
     },
+    projectRoot,
+    enableWebTools: true,
   };
 
   logger.info("CEO spawning PM + CTO in parallel…");
@@ -71,6 +75,19 @@ export async function runCEOAgent(options: CEOOptions): Promise<ProjectPlan> {
         durationMs: 0,
       });
     }
+  }
+
+  // Commit each agent's artifacts on role-specific branches
+  const agentsToCommit: { role: import("../types/agent-types.js").AgentRole; artifacts: string[]; summary: string }[] = [
+    { role: "pm", artifacts: pmResult.artifacts, summary: pmResult.summary },
+    { role: "cto", artifacts: ctoResult.artifacts, summary: ctoResult.summary },
+    ...icResults.map((ic) => ({ role: ic.role, artifacts: ic.artifacts, summary: ic.summary })),
+  ];
+
+  for (const { role, artifacts, summary } of agentsToCommit) {
+    const branch = buildBranchName(role, idea);
+    commitAgentArtifacts({ projectRoot, branchName: branch, role, artifactPaths: artifacts, summary });
+    logger.info(`${role} artifacts committed on branch ${branch}`);
   }
 
   // Determine overall status

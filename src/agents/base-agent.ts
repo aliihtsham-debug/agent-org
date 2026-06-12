@@ -3,6 +3,7 @@ import type { AgentRole, AgentResult, TaskSpec, AgentStatus } from "../types/age
 import { getSystemPrompt } from "../prompts/agent-prompts.js";
 import { writeOutput, readFileIfExists, ensureDir } from "../tools/file-tools.js";
 import { AgentLogger } from "../observability/logger.js";
+import { webSearch, webFetch } from "../tools/web-tools.js";
 
 // OpenRouter model IDs — uses free-tier models on OpenRouter (OWL / openrouter/auto)
 // Format: "openrouter/<provider>/<model>" or alias "openrouter/auto" for OWL router
@@ -17,6 +18,19 @@ const MODEL_MAP: Record<AgentRole, string> = {
   "devops-agent": "openrouter/auto",
 };
 
+// Per-agent max_tokens — orchestrators get more room for synthesis,
+// IC agents get enough for focused deliverables without over-generating.
+const MAX_TOKENS_MAP: Record<AgentRole, number> = {
+  ceo: 8192,
+  cto: 8192,
+  pm: 8192,
+  "frontend-engineer": 6000,
+  "backend-engineer": 6000,
+  "testing-agent": 5000,
+  "security-auditor": 5000,
+  "devops-agent": 5000,
+};
+
 export interface AgentContext {
   apiKey: string;
   baseURL: string;
@@ -26,6 +40,27 @@ export interface AgentContext {
   parentRole: AgentRole;
   /** Read artifacts produced by other agents for cross-referencing */
   readArtifact: (path: string) => Promise<string | null>;
+  /** Git working directory for branch/commit operations */
+  projectRoot: string;
+  /** Whether this agent should perform web research before its task */
+  enableWebTools: boolean;
+}
+
+/**
+ * Perform a quick web search and return results as a context string.
+ * Returns empty string if web tools are unavailable.
+ */
+async function gatherWebResearch(topic: string): Promise<string> {
+  try {
+    const query = topic.length > 120 ? topic.slice(0, 120) : topic;
+    const results = webSearch(query);
+    if (!results || results === "Search unavailable." || results === "No search results found.") {
+      return "";
+    }
+    return `\n\n## Web Research\n${results}`;
+  } catch {
+    return "";
+  }
 }
 
 export async function runAgent(
@@ -51,11 +86,22 @@ export async function runAgent(
       contextFiles += `\n\n## Previous Attempt Error\n${spec.previousError}\n\nPlease fix the issue and try again.`;
     }
 
+    // Append web research for agents that benefit from it
+    if (ctx.enableWebTools) {
+      const webContext = await gatherWebResearch(spec.task);
+      if (webContext) {
+        contextFiles += webContext;
+        ctx.logger.info(`${spec.role} gathered web research`);
+      }
+    }
+
     const userMessage = `${spec.task}${contextFiles}\n\nWrite all output files to: ${spec.outputPath}`;
+
+    const maxTokens = MAX_TOKENS_MAP[spec.role] ?? 8192;
 
     const response = await client.messages.create({
       model,
-      max_tokens: 8192,
+      max_tokens: maxTokens,
       system: getSystemPrompt(spec.role),
       messages: [{ role: "user", content: userMessage }],
     });
