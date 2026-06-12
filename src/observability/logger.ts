@@ -27,6 +27,10 @@ const ROLE_COLORS: Record<AgentRole, string> = {
   "scheduler-agent": "§89",
   "workflow-agent": "§67",
   "monitoring-agent": "§55",
+  // Phase 3 — PM sub-agents
+  "ux-researcher": "§D9",
+  "roadmap-agent": "§B9",
+  "analytics-agent": "§E6",
 };
 
 const ROLE_LABELS: Record<AgentRole, string> = {
@@ -56,6 +60,10 @@ const ROLE_LABELS: Record<AgentRole, string> = {
   "scheduler-agent": "SCHED",
   "workflow-agent": "FLOW",
   "monitoring-agent": "MON",
+  // Phase 3 — PM sub-agents
+  "ux-researcher": "UX",
+  "roadmap-agent": "ROAD",
+  "analytics-agent": "ANALYTICS",
 };
 
 export class AgentLogger {
@@ -91,6 +99,8 @@ export class AgentLogger {
     if (child === "budget-agent" || child === "pricing-agent") return "cfo";
     // Operations ICs: report to COO
     if (child === "scheduler-agent" || child === "workflow-agent" || child === "monitoring-agent") return "coo";
+    // PM sub-agents: report to PM
+    if (child === "ux-researcher" || child === "roadmap-agent" || child === "analytics-agent") return "pm";
     return "ceo"; // fallback
   }
 
@@ -167,6 +177,24 @@ export function colorize(text: string): string {
     "§C7": "\x1b[38;2;255;204;102m",  // yellow
     "§C0": "\x1b[38;2;239;68;68m",    // red
     "§6B": "\x1b[38;2;100;150;200m",  // steel
+    "§D6": "\x1b[38;2;214;127;255m",  // magenta
+    "§A9": "\x1b[38;2;169;240;197m",  // mint
+    "§E9": "\x1b[38;2;233;192;103m",  // gold
+    "§EC": "\x1b[38;2;236;141;125m",  // coral
+    "§F0": "\x1b[38;2;255;85;85m",    // bright red
+    "§E2": "\x1b[38;2;226;125;96m",   // orange-red
+    "§DD": "\x1b[38;2;192;144;222m",  // lavender
+    "§A0": "\x1b[38;2;80;200;120m",   // emerald
+    "§8C": "\x1b[38;2;126;200;122m",  // sage
+    "§6E": "\x1b[38;2;76;175;80m",    // green-dark
+    "§7A": "\x1b[38;2;91;155;213m",   // sky blue
+    "§89": "\x1b[38;2;200;180;220m",  // periwinkle (updated)
+    "§67": "\x1b[38;2;90;154;207m",   // slate blue
+    "§55": "\x1b[38;2;74;138;191m",   // steel blue
+    // Phase 3 — PM sub-agents
+    "§D9": "\x1b[38;2;201;121;237m",  // pink-magenta
+    "§B9": "\x1b[38;2;128;201;234m",  // cyan-light
+    "§E6": "\x1b[38;2;230;176;70m",   // amber
     "§888": "\x1b[38;2;136;136;136m", // gray
     "§r": "\x1b[0m",                   // reset
   };

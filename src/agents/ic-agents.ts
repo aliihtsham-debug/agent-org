@@ -25,7 +25,11 @@ export type ICRole =
   // Operations
   | "scheduler-agent"
   | "workflow-agent"
-  | "monitoring-agent";
+  | "monitoring-agent"
+  // Phase 3 — PM sub-agents
+  | "ux-researcher"
+  | "roadmap-agent"
+  | "analytics-agent";
 
 /** Subdirectory for a given IC role, sourced from the shared ROLE_OUTPUT_DIR. */
 function outputDir(role: ICRole): string {
@@ -92,6 +96,16 @@ export function createICTask(
       break;
     case "monitoring-agent":
       task = `Create a monitoring and alerting plan for: "${idea}"`;
+      break;
+    // ── PM sub-agents ─────────────────────────────────────────────────
+    case "ux-researcher":
+      task = `Create a UX research plan for: "${idea}"`;
+      break;
+    case "roadmap-agent":
+      task = `Create a product roadmap for: "${idea}"`;
+      break;
+    case "analytics-agent":
+      task = `Create an analytics and metrics plan for: "${idea}"`;
       break;
   }
 
@@ -185,5 +199,17 @@ export async function runOperationsICs(
   const roles: ICRole[] = ["scheduler-agent", "workflow-agent", "monitoring-agent"];
   return Promise.all(
     roles.map((role) => runICAgent(role, idea, ctx, "", "", opsSummary)),
+  );
+}
+
+/** PM ICs: spawned by PM Agent */
+export async function runPMICs(
+  idea: string,
+  ctx: AgentContext,
+  productStrategySummary: string,
+): Promise<AgentResult[]> {
+  const roles: ICRole[] = ["ux-researcher", "roadmap-agent", "analytics-agent"];
+  return Promise.all(
+    roles.map((role) => runICAgent(role, idea, ctx, "", "", productStrategySummary)),
   );
 }

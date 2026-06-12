@@ -24,7 +24,11 @@ export type AgentRole =
   | "coo"
   | "scheduler-agent"
   | "workflow-agent"
-  | "monitoring-agent";
+  | "monitoring-agent"
+  // Phase 3 — PM sub-agents
+  | "ux-researcher"
+  | "roadmap-agent"
+  | "analytics-agent";
 
 export type AgentStatus = "pending" | "in_progress" | "completed" | "failed" | "partial";
 
@@ -106,4 +110,8 @@ export const ROLE_OUTPUT_DIR: Record<AgentRole, string> = {
   "scheduler-agent": "operations/scheduler",
   "workflow-agent": "operations/workflow",
   "monitoring-agent": "operations/monitoring",
+  // Phase 3 — PM sub-agents
+  "ux-researcher": "specs/ux-research",
+  "roadmap-agent": "specs/roadmap",
+  "analytics-agent": "specs/analytics",
 };

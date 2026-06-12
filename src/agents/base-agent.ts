@@ -34,6 +34,10 @@ const MODEL_MAP: Record<AgentRole, string> = {
   "scheduler-agent": "openrouter/auto",
   "workflow-agent": "openrouter/auto",
   "monitoring-agent": "openrouter/auto",
+  // Phase 3 — PM sub-agents
+  "ux-researcher": "openrouter/auto",
+  "roadmap-agent": "openrouter/auto",
+  "analytics-agent": "openrouter/auto",
 };
 
 // Per-agent max_tokens — VP orchestrators get the most room for synthesis,
@@ -69,6 +73,10 @@ const MAX_TOKENS_MAP: Record<AgentRole, number> = {
   "scheduler-agent": 5000,
   "workflow-agent": 5000,
   "monitoring-agent": 5000,
+  // Phase 3 — PM sub-agents
+  "ux-researcher": 5000,
+  "roadmap-agent": 5000,
+  "analytics-agent": 5000,
 };
 
 export interface AgentContext {
