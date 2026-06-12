@@ -1,4 +1,5 @@
 import type { AgentRole, DelegationLog } from "../types/agent-types.js";
+import { AgentEventEmitter, type AgentEvent } from "./events.js";
 
 const ROLE_COLORS: Record<AgentRole, string> = {
   ceo: "§E3",
@@ -69,6 +70,11 @@ const ROLE_LABELS: Record<AgentRole, string> = {
 export class AgentLogger {
   private logs: DelegationLog[] = [];
   private startTime = Date.now();
+  private emitter?: AgentEventEmitter;
+
+  setEmitter(emitter: AgentEventEmitter): void {
+    this.emitter = emitter;
+  }
 
   spawn(from: AgentRole, to: AgentRole): void {
     const entry: DelegationLog = {
@@ -80,6 +86,13 @@ export class AgentLogger {
     };
     this.logs.push(entry);
     console.log(`  ${this._arrow} ${this._c(from)} delegates to ${this._c(to)}`);
+    this.emitter?.emit({
+      type: "spawn",
+      timestamp: entry.timestamp,
+      from,
+      to,
+      summary: entry.summary,
+    });
   }
 
   /** Determine the logical parent of a role for logging */
@@ -114,6 +127,12 @@ export class AgentLogger {
     };
     this.logs.push(entry);
     console.log(`  ${this._check} ${this._c(role)} done — ${summary}`);
+    this.emitter?.emit({
+      type: "complete",
+      timestamp: entry.timestamp,
+      role,
+      summary,
+    });
   }
 
   fail(role: AgentRole, error: string): void {
@@ -126,14 +145,31 @@ export class AgentLogger {
     };
     this.logs.push(entry);
     console.log(`  ${this._cross} ${this._c(role)} failed — ${error}`);
+    this.emitter?.emit({
+      type: "fail",
+      timestamp: entry.timestamp,
+      role,
+      error,
+    });
   }
 
   retry(role: AgentRole, attempt: number): void {
     console.log(`  ${this._retry} ${this._c(role)} retry #${attempt}`);
+    this.emitter?.emit({
+      type: "retry",
+      timestamp: new Date().toISOString(),
+      role,
+      attempt,
+    });
   }
 
   info(message: string): void {
     console.log(`  ${this._info} ${message}`);
+    this.emitter?.emit({
+      type: "info",
+      timestamp: new Date().toISOString(),
+      summary: message,
+    });
   }
 
   banner(message: string): void {

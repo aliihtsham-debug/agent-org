@@ -8,7 +8,11 @@ import { runCFOAgent } from "../agents/cfo-agent.js";
 import { runCOOAgent } from "../agents/coo-agent.js";
 import type { AgentContext } from "../agents/base-agent.js";
 import { AgentLogger } from "../observability/logger.js";
+import { AgentEventEmitter } from "../observability/events.js";
+import { createStructuredLogHandlers } from "../observability/structured-log.js";
+import { promptApproval } from "../observability/approval.js";
 import { buildBranchName, commitAgentArtifacts, pushBranchAndCreatePR } from "../tools/git-commit.js";
+import { broadcastEvent, updateStatus } from "../dashboard/server.js";
 
 export interface CEOOptions {
   idea: string;
@@ -17,12 +21,22 @@ export interface CEOOptions {
   outputBase: string;
   logger: AgentLogger;
   projectRoot: string;
+  /** Whether to pause at milestone gates for human approval */
+  enableApproval?: boolean;
 }
 
 export async function runCEOAgent(options: CEOOptions): Promise<ProjectPlan> {
-  const { idea, apiKey, baseURL, outputBase, logger, projectRoot } = options;
+  const { idea, apiKey, baseURL, outputBase, logger, projectRoot, enableApproval = false } = options;
 
   logger.banner(`Agent Org — Product Idea: "${idea}"`);
+
+  // ── Set up event emitter + structured logging ──
+  const emitter = new AgentEventEmitter();
+  logger.setEmitter(emitter);
+  const { onEvent, onArtifact } = createStructuredLogHandlers(outputBase);
+  emitter.subscribe(onEvent);
+  emitter.subscribe((event) => broadcastEvent(event));
+  updateStatus("running");
 
   const ctx: AgentContext = {
     apiKey,
@@ -70,37 +84,74 @@ export async function runCEOAgent(options: CEOOptions): Promise<ProjectPlan> {
     }
   }
 
-  // Commit each agent's artifacts on role-specific branches
+  // ── GATE 1: Review VP outputs before committing ──
   const vpResults = [pmResult, ctoResult, cisoResult, cfoResult, cooResult];
+  const succeededVPs = vpResults.filter((r) => r.status === "completed" || r.status === "partial");
+  const failedVPs = vpResults.filter((r) => r.status === "failed");
+
+  if (enableApproval) {
+    emitter.emit({
+      type: "gate",
+      timestamp: new Date().toISOString(),
+      summary: `VP outputs ready: ${succeededVPs.length} succeeded, ${failedVPs.length} failed`,
+    });
+    const approved = await promptApproval(
+      `VP outputs ready — ${succeededVPs.length} succeeded, ${failedVPs.length} failed. Proceed with git commit?`,
+    );
+    if (!approved) {
+      logger.info("User skipped git commit. Building plan without commits.");
+      return await buildPlan(idea, outputBase, vpResults, icResults, logger, projectRoot, onArtifact);
+    }
+  }
+
+  // Commit each agent's artifacts on role-specific branches
   const agentsToCommit = [
-    ...vpResults.map((r) => ({ role: r.role, artifacts: r.artifacts, summary: r.summary })),
-    ...icResults.map((r) => ({ role: r.role, artifacts: r.artifacts, summary: r.summary })),
+    ...vpResults.map((r) => ({ role: r.role, artifacts: r.artifacts, summary: r.summary, result: r })),
+    ...icResults.map((r) => ({ role: r.role, artifacts: r.artifacts, summary: r.summary, result: r })),
   ];
 
-  for (const { role, artifacts, summary } of agentsToCommit) {
+  for (const { role, artifacts, summary, result } of agentsToCommit) {
     const branch = buildBranchName(role, idea);
     commitAgentArtifacts({ projectRoot, branchName: branch, role, artifactPaths: artifacts, summary });
     logger.info(`${role} artifacts committed on branch ${branch}`);
+    onArtifact(result, projectRoot);
     pushBranchAndCreatePR({ projectRoot, branchName: branch, role, summary });
   }
 
+  return await buildPlan(idea, outputBase, vpResults, icResults, logger, projectRoot, onArtifact);
+}
+
+async function buildPlan(
+  idea: string,
+  outputBase: string,
+  vpResults: AgentResult[],
+  icResults: AgentResult[],
+  logger: AgentLogger,
+  projectRoot: string,
+  onArtifact: (result: AgentResult, projectRoot: string) => void,
+): Promise<ProjectPlan> {
   // Determine overall status
   const gaps: string[] = [];
   const vpLabels: { result: AgentResult; label: string }[] = [
-    { result: pmResult, label: "PM" },
-    { result: ctoResult, label: "CTO" },
-    { result: cisoResult, label: "CISO" },
-    { result: cfoResult, label: "CFO" },
-    { result: cooResult, label: "COO" },
+    { result: vpResults[0], label: "PM" },
+    { result: vpResults[1], label: "CTO" },
+    { result: vpResults[2], label: "CISO" },
+    { result: vpResults[3], label: "CFO" },
+    { result: vpResults[4], label: "COO" },
   ];
   for (const { result, label } of vpLabels) {
     if (result.status === "failed") gaps.push(`${label} agent failed`);
     if (result.status === "partial") gaps.push(`${label} agent produced partial output`);
   }
 
-  const allFailed = pmResult.status === "failed" && ctoResult.status === "failed" &&
-    cisoResult.status === "failed" && cfoResult.status === "failed" && cooResult.status === "failed";
-  const anyFailed = vpLabels.some(({ result }) => result.status === "failed");
+  const allFailed = vpResults.every((r) => r.status === "failed");
+  const anyFailed = vpResults.some((r) => r.status === "failed");
+
+  const pmResult = vpResults[0];
+  const ctoResult = vpResults[1];
+  const cisoResult = vpResults[2];
+  const cfoResult = vpResults[3];
+  const cooResult = vpResults[4];
 
   const plan: ProjectPlan = {
     idea,
@@ -140,6 +191,8 @@ export async function runCEOAgent(options: CEOOptions): Promise<ProjectPlan> {
   logger.info(`Total tokens: ~${totalTokens.toLocaleString()} (input+output)`);
   logger.info(`Total duration: ${(logger.getDuration() / 1000).toFixed(1)}s`);
   logger.info(`Outputs written to: ${outputBase}/`);
+
+  updateStatus(plan.status === "failed" ? "failed" : "complete");
 
   return plan;
 }
@@ -193,7 +246,7 @@ ${plan.icResults.map((r) => `| ${r.role} | ${r.tokenUsage.input.toLocaleString()
 
 ---
 
-*Generated by Agent Org v0.3.0*
+*Generated by Agent Org v0.4.0*
 `;
 
   await writeOutput(`${outputBase}/project-plan.md`, md);
