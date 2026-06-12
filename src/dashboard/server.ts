@@ -1,7 +1,10 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { readFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { AgentEvent } from "../observability/events.js";
+
+const __dirname = fileURLToPath(new URL(".", import.meta.url));
 
 export type DashboardStatus = "idle" | "running" | "waiting_approval" | "complete" | "failed";
 
