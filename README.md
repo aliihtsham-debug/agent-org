@@ -284,7 +284,7 @@ The product idea can be any length. Everything after `src/index.ts` is joined in
 | `--refine` | Enable cross-functional iterative refinement (Phase 6) |
 | `--help`, `-h` | Show help |
 
-> **Note:** Linear sync (Phase 7) is controlled by the `LINEAR_API_KEY` environment variable, not a CLI flag. Set it in `.env` to enable.
+> **Note:** Linear sync is controlled by the `LINEAR_API_KEY` environment variable, not a CLI flag. Set it in `.env` to enable.
 
 ### Examples
 
@@ -560,7 +560,7 @@ Index of all generated artifacts with metadata: `{ role, path, timestamp, sizeBy
 - Dashboard definitions, SLA/SLO targets
 - Error tracking setup, key product metrics
 
-### Linear Mapper Agent (Phase 7)
+### Linear Mapper Agent 
 - Reads all agent output files from the registry/disk
 - Extracts user stories, epics, sprints, security findings, and deliverables
 - Produces structured `linear-import.json` with: project name, labels, cycles, issues, and metadata
@@ -568,7 +568,7 @@ Index of all generated artifacts with metadata: `{ role, path, timestamp, sizeBy
 - Maps security severities to Linear priority
 - Does NOT call the Linear API — only produces structured data for the sync module
 
-### Linear Sync (Phase 7)
+### Linear Sync 
 - Creates Linear project from the mapper's structured data
 - Creates labels for each agent role / VP branch
 - Creates cycles from the scheduler's sprint plan (up to 3)
@@ -661,7 +661,7 @@ agent-org/
 │   │   ├── ciso-agent.ts         # CISO orchestrator
 │   │   ├── cfo-agent.ts          # CFO orchestrator
 │   │   ├── coo-agent.ts          # COO orchestrator
-│   │   ├── linear-mapper-agent.ts # Linear mapper agent (Phase 7)
+│   │   ├── linear-mapper-agent.ts # Linear mapper agent 
 │   │   └── ic-agents.ts          # 16 IC agents (factory + spawn functions)
 │   │
 │   ├── prompts/
@@ -672,8 +672,8 @@ agent-org/
 │   │   ├── git-tools.ts          # Low-level git operations
 │   │   ├── git-commit.ts         # Branch/commit/PR workflow
 │   │   ├── web-tools.ts          # Web search/fetch
-│   │   ├── linear-sync.ts        # Linear API sync (Phase 7)
-│   │   └── linear-types.ts       # Linear type definitions (Phase 7)
+│   │   ├── linear-sync.ts        # Linear API sync 
+│   │   └── linear-types.ts       # Linear type definitions 
 │   │
 │   ├── types/
 │   │   └── agent-types.ts        # Shared types + ROLE_OUTPUT_DIR
@@ -691,7 +691,7 @@ agent-org/
 │
 ├── tests/
 │   ├── e2e.test.ts               # End-to-end tests (Vitest)
-│   └── linear-sync.test.ts       # Linear sync unit tests (Phase 7)
+│   └── linear-sync.test.ts       # Linear sync unit tests 
 │
 ├── outputs/                       # Agent-generated artifacts (gitignored)
 ├── dist/                          # Compiled JavaScript (build output)
@@ -774,7 +774,6 @@ The Linear Mapper agent couldn't produce valid JSON. This can happen if agent ou
 - [x] **Phase 5**: Agent-to-agent direct communication — in-memory registry, no disk round-trip
 - [x] **Phase 6**: Iterative refinement — cross-functional review pairs, `--refine` flag
 - [x] **Phase 7**: Linear integration — sync project plan to Linear workspace via `LINEAR_API_KEY`
-- [ ] **Phase 8**: Custom agent plugins — users can define their own agents
 
 ---
 
