@@ -40,6 +40,8 @@ const MODEL_MAP: Record<AgentRole, string> = {
   "ux-researcher": "openrouter/auto",
   "roadmap-agent": "openrouter/auto",
   "analytics-agent": "openrouter/auto",
+  // Phase 7 — Linear integration
+  "linear-mapper": "openrouter/auto",
 };
 
 // Per-agent max_tokens — VP orchestrators get the most room for synthesis,
@@ -79,6 +81,8 @@ const MAX_TOKENS_MAP: Record<AgentRole, number> = {
   "ux-researcher": 5000,
   "roadmap-agent": 5000,
   "analytics-agent": 5000,
+  // Phase 7 — Linear integration
+  "linear-mapper": 8192,
 };
 
 export interface AgentContext {

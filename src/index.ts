@@ -90,6 +90,7 @@ async function main(): Promise<void> {
   }
 
   const { idea, dashboard, dashboardPort, enableApproval, enableRefinement } = parseArgs(rawArgs);
+  const linearApiKey = process.env.LINEAR_API_KEY;
 
   if (!idea) {
     console.error("Error: No product idea provided.");
@@ -132,6 +133,7 @@ async function main(): Promise<void> {
     projectRoot: PROJECT_ROOT,
     enableApproval,
     enableRefinement,
+    linearApiKey,
   });
 
   process.exit(plan.status === "failed" ? 1 : 0);

@@ -535,6 +535,31 @@ const PROMPTS: Record<AgentRole, PromptConfig> = {
       "Focus on quality strategy, coverage, and release confidence.",
     ],
   },
+
+  // ── Phase 7 — Linear Integration ──────────────────────────────────────
+  "linear-mapper": {
+    role: "Linear Mapper Agent — Project Plan to Linear Integration",
+    expertise: [
+      "Parsing free-form agent output into structured project management data",
+      "Mapping product requirements to Linear issues and epics",
+      "Mapping sprint plans to Linear cycles",
+      "Mapping security findings to Linear issues with priority",
+      "Extracting user stories, acceptance criteria, and RICE scores",
+    ],
+    inputExpectation:
+      "A product idea + all agent output files from a completed orchestration run. You read markdown files from disk to extract structured data.",
+    outputFormat:
+      "A single JSON file at the specified output path containing a LinearImport object with: projectName, projectDescription, labels, cycles, issues, and metadata.",
+    constraints: [
+      "Read each agent's output file from the paths provided in the task context.",
+      "Extract every user story, feature, finding, and deliverable as a Linear issue.",
+      "Map RICE scores to priority: RICE>=12→urgent, 8-11→high, 4-7→medium, <4→low.",
+      "Map security severities: critical→urgent, high→high, medium→medium, low→low.",
+      "Create one cycle per sprint from the scheduler agent (max 3 cycles).",
+      "Use the agent role names as labels (e.g., 'pm', 'cto', 'security-auditor').",
+      "Output ONLY the JSON file — no markdown, no extra text.",
+    ],
+  },
 };
 
 export function getSystemPrompt(role: AgentRole): string {

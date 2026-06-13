@@ -7,8 +7,9 @@ dist/
 # Agent-generated outputs
 outputs/
 
-# Test output directory (created/destroyed by vitest e2e tests)
+# Test output directories (created/destroyed by vitest e2e tests)
 outputs-test/
+outputs-test-linear/
 
 # Agent git branches (created by git-commit.ts)
 # Branches follow pattern: agent/<role>/<idea-slug>

@@ -1,4 +1,4 @@
-import type { AgentResult, ProjectPlan, RefinementConfig, RefinementReport } from "../types/agent-types.js";
+import type { AgentResult, ProjectPlan, RefinementConfig, RefinementReport, LinearSyncResult } from "../types/agent-types.js";
 import { ROLE_OUTPUT_DIR } from "../types/agent-types.js";
 import { writeOutput } from "../tools/file-tools.js";
 import { runPMAgent } from "../agents/pm-agent.js";
@@ -31,10 +31,12 @@ export interface CEOOptions {
   enableRefinement?: boolean;
   /** Phase 6 — Refinement configuration (uses defaults if not provided) */
   refinementConfig?: RefinementConfig;
+  /** Phase 7 — Linear API key for project sync (optional) */
+  linearApiKey?: string;
 }
 
 export async function runCEOAgent(options: CEOOptions): Promise<ProjectPlan> {
-  const { idea, apiKey, baseURL, outputBase, logger, projectRoot, enableApproval = false, enableRefinement = false } = options;
+  const { idea, apiKey, baseURL, outputBase, logger, projectRoot, enableApproval = false, enableRefinement = false, linearApiKey } = options;
 
   logger.banner(`Agent Org — Product Idea: "${idea}"`);
 
@@ -147,6 +149,46 @@ export async function runCEOAgent(options: CEOOptions): Promise<ProjectPlan> {
     logger.info(`Refinement complete: ${refinedAgents.length} agents refined (${actionableCritiques} actionable critiques)`);
   }
 
+  // ── Phase 7: Linear project sync ──
+  let linearSyncResult: LinearSyncResult | undefined;
+  if (linearApiKey) {
+    logger.info("CEO starting Linear project sync…");
+    try {
+      const { runLinearMapper } = await import("../agents/linear-mapper-agent.js");
+      const { syncToLinear } = await import("../tools/linear-sync.js");
+
+      // Step 1: Mapper agent reads all outputs → linear-import.json
+      const mapperResult = await runLinearMapper(idea, ctx, registry);
+
+      if (mapperResult.success && mapperResult.import) {
+        // Step 2: Sync structured data to Linear
+        linearSyncResult = await syncToLinear({
+          apiKey: linearApiKey,
+          linearImport: mapperResult.import,
+          project: {
+            idea,
+            timestamp: new Date().toISOString(),
+            pmResult,
+            ctoResult,
+            cisoResult,
+            cfoResult,
+            cooResult,
+            icResults,
+            status: "complete",
+            gaps: [],
+          },
+          logger,
+        });
+        logger.info(`Linear sync: ${linearSyncResult.created} created, ${linearSyncResult.skipped} skipped`);
+      } else {
+        logger.info(`Linear sync skipped: mapper failed — ${mapperResult.error ?? "unknown error"}`);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.info(`Linear sync failed (non-fatal): ${msg}`);
+    }
+  }
+
   // ── GATE 1: Review VP outputs before committing ──
   const vpResults = [pmResult, ctoResult, cisoResult, cfoResult, cooResult];
   const succeededVPs = vpResults.filter((r) => r.status === "completed" || r.status === "partial");
@@ -163,7 +205,7 @@ export async function runCEOAgent(options: CEOOptions): Promise<ProjectPlan> {
     );
     if (!approved) {
       logger.info("User skipped git commit. Building plan without commits.");
-      return await buildPlan(idea, outputBase, vpResults, icResults, logger, projectRoot, onArtifact, refinementReport);
+      return await buildPlan(idea, outputBase, vpResults, icResults, logger, projectRoot, onArtifact, refinementReport, linearSyncResult);
     }
   }
 
@@ -181,7 +223,7 @@ export async function runCEOAgent(options: CEOOptions): Promise<ProjectPlan> {
     pushBranchAndCreatePR({ projectRoot, branchName: branch, role, summary });
   }
 
-  return await buildPlan(idea, outputBase, vpResults, icResults, logger, projectRoot, onArtifact, refinementReport);
+  return await buildPlan(idea, outputBase, vpResults, icResults, logger, projectRoot, onArtifact, refinementReport, linearSyncResult);
 }
 
 async function buildPlan(
@@ -193,6 +235,7 @@ async function buildPlan(
   projectRoot: string,
   onArtifact: (result: AgentResult, projectRoot: string) => void,
   refinementReport?: RefinementReport,
+  linearSyncResult?: LinearSyncResult,
 ): Promise<ProjectPlan> {
   // Determine overall status
   const gaps: string[] = [];
@@ -229,6 +272,7 @@ async function buildPlan(
     status: allFailed ? "failed" : anyFailed || gaps.length > 0 ? "partial" : "complete",
     gaps,
     refinementReport,
+    linearSync: linearSyncResult,
   };
 
   // Write project plan

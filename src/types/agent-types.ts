@@ -1,3 +1,6 @@
+import type { LinearSyncResult } from "../tools/linear-types.js";
+export type { LinearSyncResult };
+
 export type AgentRole =
   | "ceo"
   | "cto"
@@ -28,7 +31,9 @@ export type AgentRole =
   // Phase 3 — PM sub-agents
   | "ux-researcher"
   | "roadmap-agent"
-  | "analytics-agent";
+  | "analytics-agent"
+  // Phase 7 — Linear integration
+  | "linear-mapper";
 
 export type AgentStatus = "pending" | "in_progress" | "completed" | "failed" | "partial";
 
@@ -71,6 +76,8 @@ export interface ProjectPlan {
   gaps: string[];
   /** Phase 6 — refinement metadata (only present when refinement was run) */
   refinementReport?: RefinementReport;
+  /** Phase 7 — Linear sync result (only present when LINEAR_API_KEY was set) */
+  linearSync?: LinearSyncResult;
 }
 
 /** Summary of the refinement phase for inclusion in the project plan. */
@@ -160,4 +167,6 @@ export const ROLE_OUTPUT_DIR: Record<AgentRole, string> = {
   "ux-researcher": "specs/ux-research",
   "roadmap-agent": "specs/roadmap",
   "analytics-agent": "specs/analytics",
+  // Phase 7 — Linear integration
+  "linear-mapper": "linear/mapper",
 };

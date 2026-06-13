@@ -32,6 +32,8 @@ const ROLE_COLORS: Record<AgentRole, string> = {
   "ux-researcher": "§D9",
   "roadmap-agent": "§B9",
   "analytics-agent": "§E6",
+  // Phase 7 — Linear integration
+  "linear-mapper": "§4A",
 };
 
 const ROLE_LABELS: Record<AgentRole, string> = {
@@ -65,6 +67,8 @@ const ROLE_LABELS: Record<AgentRole, string> = {
   "ux-researcher": "UX",
   "roadmap-agent": "ROAD",
   "analytics-agent": "ANALYTICS",
+  // Phase 7 — Linear integration
+  "linear-mapper": "LIN",
 };
 
 export class AgentLogger {
@@ -231,6 +235,7 @@ export function colorize(text: string): string {
     "§D9": "\x1b[38;2;201;121;237m",  // pink-magenta
     "§B9": "\x1b[38;2;128;201;234m",  // cyan-light
     "§E6": "\x1b[38;2;230;176;70m",   // amber
+    "§4A": "\x1b[38;2;64;170;130m",   // teal-green
     "§888": "\x1b[38;2;136;136;136m", // gray
     "§r": "\x1b[0m",                   // reset
   };
