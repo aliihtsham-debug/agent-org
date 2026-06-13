@@ -90,7 +90,7 @@ You type a product idea
 ### Execution Flow
 
 1. **You run the CLI** with a product idea string.
-2. The **CEO Agent** spawns 5 VPs in parallel: PM, CTO, CISO, CFO, COO (`Promise.all`).
+2. The **CEO Agent** spawns 5 VPs in parallel: PM, CTO, CISO, CFO, COO (`Promise.allSettled`).
 3. Each VP produces their own strategy/overview, then spawns their IC sub-agents in parallel.
 4. Each **IC Agent** reads the parent's summary for context and produces its deliverable.
 5. All agents write markdown artifacts to `outputs/` on disk (artifact-based communication).
@@ -100,8 +100,10 @@ You type a product idea
 ### Communication Model
 
 - **Top-down delegation**: Parent agents spawn children with a clear task description, context, and expected output format.
-- **Bottom-up reporting**: Children write structured markdown artifacts to disk; parents read them back.
-- **Artifact-based**: All inter-agent communication happens through the file system (`outputs/` directory), not through in-memory message passing. This avoids context window limits and makes every artifact inspectable.
+- **Bottom-up reporting**: Children publish results to the in-memory `AgentResultsRegistry`; parents read summaries directly (no disk round-trip, no truncation).
+- **In-memory registry** (`AgentResultsRegistry`): Shared `Map<AgentRole, AgentResult>` for direct agent-to-agent result access. Eliminates the old disk-read + truncation pattern.
+- **Message bus** (`AgentMessageBus`): Targeted agent-to-agent messages, separate from the event emitter.
+- **Disk writes preserved**: Every agent still writes `output.md` to disk as a durable audit trail. The registry is an additive optimization.
 - **No lateral spawning**: The org chart is strictly hierarchical. IC agents don't spawn other agents.
 
 ---
@@ -631,7 +633,7 @@ Agent Org includes multiple security measures designed to protect against common
 ### SSRF and Injection Protection
 - **Web tools security**: `webFetch()` blocks private/internal IP ranges (localhost, 10.x.x.x, 192.168.x.x, 172.16-31.x.x, 169.254.x.x) to prevent Server-Side Request Forgery (SSRF).
 - **Scheme restriction**: Only `http://` and `https://` protocols are allowed.
-- **Git operations**: All git operations use `execFileSync` (not shell execution), preventing command injection.
+- **Git operations**: All git operations use `execFileSync` or `execSync` with argument arrays — never shell string interpolation — preventing command injection.
 - **Path confinement**: `readArtifact()` validates that file reads stay within the `outputBase` directory. Traversal attempts outside this directory are blocked.
 
 ### Approval Gates Ordering
@@ -712,7 +714,7 @@ agent-org/
 │   │   ├── cfo-agent.ts          # CFO orchestrator
 │   │   ├── coo-agent.ts          # COO orchestrator
 │   │   ├── linear-mapper-agent.ts # Linear mapper agent 
-│   │   └── ic-agents.ts          # 16 IC agents (factory + spawn functions)
+│   │   └── ic-agents.ts          # 17 IC agents (factory + spawn functions)
 │   │
 │   ├── prompts/
 │   │   └── agent-prompts.ts      # All 26 system prompts (centralized)
@@ -744,16 +746,15 @@ agent-org/
 │
 ├── tests/
 │   ├── e2e.test.ts               # End-to-end integration tests (28 tests)
-│   ├── linear-sync.test.ts       # Linear sync unit tests (8 tests)
-│   ├── linear-mapper-edge.test.ts # Linear mapper edge cases (8 tests)
-│   ├── refinement.test.ts        # Refinement phase tests (18 tests)
+│   ├── registry.test.ts          # Registry poisoning prevention (24 tests)
+│   ├── refinement.test.ts        # Refinement phase tests (17 tests)
 │   ├── base-agent.test.ts        # Base agent utilities (17 tests)
-│   ├── registry.test.ts          # Registry poisoning prevention (18 tests)
 │   ├── message-bus.test.ts       # Message bus error isolation (10 tests)
 │   ├── event-emitter.test.ts     # Event emitter error isolation (10 tests)
-│   ├── readartifact-safety.test.ts # Path traversal prevention (10 tests)
+│   ├── readartifact-safety.test.ts # Path traversal prevention (7 tests)
+│   ├── linear-mapper-edge.test.ts # Linear mapper edge cases (7 tests)
 │   ├── ceo-partial-failure.test.ts # CEO resilience (7 tests)
-│   └── semaphore.test.ts         # Concurrency limiter (5 tests)
+│   └── linear-sync.test.ts       # Linear sync unit tests (6 tests)
 │                               # Total: 135 tests across 10 files
 │
 ├── outputs/                       # Agent-generated artifacts (gitignored)
@@ -766,13 +767,13 @@ agent-org/
 ## Design Decisions
 
 ### 1. 26 Agents
-The current implementation has 26 agents: 1 CEO, 5 VPs, 2 managers, 16 ICs, and 1 Linear Mapper agent.
+The current implementation has 26 agents: 1 CEO, 5 VPs, 2 managers, 17 ICs, and 1 Linear Mapper agent.
 
 ### 2. Parallel Execution
-All IC agents run simultaneously via `Promise.all`. All 5 VPs run simultaneously. This is critical for performance.
+All IC agents run simultaneously via `Promise.all`. All 5 VPs run simultaneously via `Promise.allSettled`. This is critical for performance.
 
-### 3. Artifact-Based Communication
-Agents write to `outputs/` on disk; parents read from there. This avoids context window limits and makes every artifact inspectable.
+### 3. Registry + Disk Communication
+Agents publish results to the in-memory `AgentResultsRegistry` for direct parent access (no disk round-trip). Every agent also writes `output.md` to disk as a durable, inspectable audit trail.
 
 ### 4. Centralized Prompts
 All system prompts live in `src/prompts/agent-prompts.ts`. Tweaking agent behavior is a single-file edit.
