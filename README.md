@@ -267,6 +267,7 @@ The product idea can be any length. Everything after `src/index.ts` is joined in
 |------|-------------|
 | `--dashboard [port]` | Start web dashboard for real-time monitoring (default port: 3001) |
 | `--approve` | Enable human approval gates at milestones |
+| `--refine` | Enable cross-functional iterative refinement (Phase 6) |
 | `--help`, `-h` | Show help |
 
 ### Examples
@@ -281,8 +282,11 @@ npx tsx src/index.ts "A social fitness app" --dashboard 3001
 # With approval gates (pauses at milestones for human review)
 npx tsx src/index.ts "B2B inventory management system" --approve
 
-# Both dashboard and approval gates
-npx tsx src/index.ts "Recipe sharing platform" --dashboard --approve
+# With cross-functional refinement (agents review each other's work)
+npx tsx src/index.ts "E-commerce platform" --refine
+
+# All flags combined
+npx tsx src/index.ts "Recipe sharing platform" --dashboard --approve --refine
 ```
 
 ### Help
@@ -719,8 +723,8 @@ This is expected if `git-commit.ts` is not mocked. The E2E tests mock this modul
 - [x] **Phase 2**: Cross-functional — CISO, CFO, COO + sub-agents (21 agents total)
 - [x] **Phase 3**: Git integration — branch per agent, push + PR workflow
 - [x] **Phase 4**: Polish & observability — dashboard, structured logging, approval gates, E2E tests
-- [ ] **Phase 5**: Agent-to-agent direct communication (not just through files)
-- [ ] **Phase 6**: Support for iterative refinement (agents improve each other's work)
+- [x] **Phase 5**: Agent-to-agent direct communication — in-memory registry, no disk round-trip
+- [x] **Phase 6**: Iterative refinement — cross-functional review pairs, `--refine` flag
 - [ ] **Phase 7**: Integration with project management tools (Linear, Jira)
 - [ ] **Phase 8**: Custom agent plugins — users can define their own agents
 
