@@ -4,6 +4,7 @@ import "dotenv/config";
 import { runCEOAgent } from "./orchestrator/ceo-agent.js";
 import { AgentLogger } from "./observability/logger.js";
 import { startDashboardServer } from "./dashboard/server.js";
+import { configureLLMConcurrency } from "./agents/base-agent.js";
 import { mkdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -98,6 +99,14 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  // SECURITY: Cap idea length to prevent context-window exhaustion / cost amplification.
+  // 10 KB is generous for any product idea while preventing abuse.
+  const MAX_IDEA_LENGTH = 10_000;
+  if (idea.length > MAX_IDEA_LENGTH) {
+    console.error(`Error: Product idea exceeds maximum length of ${MAX_IDEA_LENGTH} characters (got ${idea.length}).`);
+    process.exit(1);
+  }
+
   const apiKey = process.env.OPENROUTER_API_KEY;
   const baseURL = process.env.OPENROUTER_BASE_URL || DEFAULT_BASE_URL;
 
@@ -107,6 +116,10 @@ async function main(): Promise<void> {
     console.error("Get a key at: https://openrouter.ai/keys");
     process.exit(1);
   }
+
+  // Configure LLM concurrency limit from env variable (default: 8)
+  const llmMaxConcurrent = parseInt(process.env.LLM_MAX_CONCURRENT ?? "8", 10);
+  configureLLMConcurrency(llmMaxConcurrent);
 
   const outputBase = join(PROJECT_ROOT, "outputs");
   await mkdir(outputBase, { recursive: true });

@@ -2,6 +2,12 @@ import type { AgentResult } from "../types/agent-types.js";
 import { runAgentWithRetry, type AgentContext } from "./base-agent.js";
 import { runEngineeringICs } from "./ic-agents.js";
 
+/**
+ * Run the Engineering Manager orchestrator agent.
+ *
+ * Produces an engineering plan, then spawns Frontend, Backend, AI, and DevOps
+ * engineers in parallel. Aggregates all engineering IC results.
+ */
 export async function runEngManagerAgent(
   idea: string,
   ctx: AgentContext,
@@ -57,7 +63,7 @@ export async function runEngManagerAgent(
       input: Math.floor(totalTokens * 0.6),
       output: Math.floor(totalTokens * 0.4),
     },
-    durationMs: planResult.durationMs + Math.max(...icResults.map((r) => r.durationMs)),
+    durationMs: planResult.durationMs + (icResults.length > 0 ? Math.max(...icResults.map((r) => r.durationMs)) : 0),
     error: failedICs.length > 0 ? `IC failures: ${failedICs.map((r) => r.role).join(", ")}` : undefined,
     icResults,
   };

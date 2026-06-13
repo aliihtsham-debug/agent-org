@@ -1,5 +1,35 @@
 import type { AgentRole, AgentResult } from "../types/agent-types.js";
 
+/** All valid agent roles — used to validate registry entries. */
+const VALID_ROLES: ReadonlySet<string> = new Set<AgentRole>([
+  "ceo",
+  "cto",
+  "pm",
+  "frontend-engineer",
+  "backend-engineer",
+  "testing-agent",
+  "security-auditor",
+  "devops-agent",
+  "engineering-manager",
+  "qa-manager",
+  "ai-engineer",
+  "performance-agent",
+  "ciso",
+  "vuln-scanner",
+  "compliance-agent",
+  "cfo",
+  "budget-agent",
+  "pricing-agent",
+  "coo",
+  "scheduler-agent",
+  "workflow-agent",
+  "monitoring-agent",
+  "ux-researcher",
+  "roadmap-agent",
+  "analytics-agent",
+  "linear-mapper",
+]);
+
 /**
  * Shared in-memory results registry for direct agent-to-agent result access.
  *
@@ -19,12 +49,64 @@ import type { AgentRole, AgentResult } from "../types/agent-types.js";
  *
  * Disk writes are preserved as the durable audit trail. The registry is purely
  * an in-memory optimization layered on top.
+ *
+ * SECURITY: publish() validates that the role is a known agent role and that
+ * the result object is well-formed. This prevents registry poisoning where a
+ * compromised or manipulated agent could inject entries under arbitrary keys
+ * (e.g., overwriting another agent's results or injecting fake roles).
  */
 export class AgentResultsRegistry {
   private results: Map<AgentRole, AgentResult> = new Map();
 
-  /** Publish a result so other agents can access it. */
+  /**
+   * Publish a result so other agents can access it.
+   *
+   * SECURITY: Validates the result before accepting it:
+   * - Role must be a known AgentRole (prevents arbitrary key injection)
+   * - Role must be a non-empty string
+   * - Result must have required fields (status, summary, artifacts, tokenUsage)
+   * - Summary length is capped to prevent memory exhaustion
+   *
+   * @throws Error if the result fails validation (fail-closed)
+   */
   publish(result: AgentResult): void {
+    // Validate role is a known agent role — prevents registry poisoning via
+    // arbitrary role keys that downstream agents might trust
+    if (!result.role || typeof result.role !== "string") {
+      throw new Error("Registry publish rejected: missing or invalid role");
+    }
+    if (!VALID_ROLES.has(result.role)) {
+      throw new Error(`Registry publish rejected: unknown role "${result.role}"`);
+    }
+
+    // Validate required fields exist — prevents partial/corrupt entries
+    if (!result.status || typeof result.status !== "string") {
+      throw new Error(`Registry publish rejected for "${result.role}": missing status`);
+    }
+    if (typeof result.summary !== "string") {
+      throw new Error(`Registry publish rejected for "${result.role}": missing summary`);
+    }
+    if (!Array.isArray(result.artifacts)) {
+      throw new Error(`Registry publish rejected for "${result.role}": missing artifacts array`);
+    }
+    if (!result.tokenUsage || typeof result.tokenUsage.input !== "number" || typeof result.tokenUsage.output !== "number") {
+      throw new Error(`Registry publish rejected for "${result.role}": missing tokenUsage`);
+    }
+
+    // Cap summary length to prevent memory exhaustion via oversized entries
+    const MAX_SUMMARY_LENGTH = 100_000;
+    if (result.summary.length > MAX_SUMMARY_LENGTH) {
+      result.summary = result.summary.slice(0, MAX_SUMMARY_LENGTH) + "\n...[truncated by registry]";
+
+    }
+
+    // Validate artifact paths: reject path traversal attempts
+    for (const artifact of result.artifacts) {
+      if (artifact.includes("..") || artifact.startsWith("/") || artifact.startsWith("\\")) {
+        throw new Error(`Registry publish rejected for "${result.role}": suspicious artifact path "${artifact}"`);
+      }
+    }
+
     this.results.set(result.role, result);
   }
 
@@ -49,9 +131,16 @@ export class AgentResultsRegistry {
     return this.results.has(role);
   }
 
-  /** Get a snapshot of all published results. */
+  /** Get a snapshot of all published results.
+   * Returns a shallow copy to prevent external mutation of the internal map.
+   * For read-only iteration without copying, use `entries()`. */
   getAll(): ReadonlyMap<AgentRole, AgentResult> {
     return new Map(this.results);
+  }
+
+  /** Iterate over all results without copying (zero-allocation). */
+  entries(): IterableIterator<[AgentRole, AgentResult]> {
+    return this.results.entries();
   }
 
   /** Clear all results (useful for testing). */

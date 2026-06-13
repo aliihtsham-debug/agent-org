@@ -2,12 +2,15 @@ import type { LinearClient } from "@linear/sdk";
 import type { AgentLogger } from "../observability/logger.js";
 import type { LinearImport, LinearSyncResult, LinearIssueInput } from "./linear-types.js";
 import type { ProjectPlan } from "../types/agent-types.js";
+import { Semaphore } from "../utils/semaphore.js";
 
 export interface LinearSyncOptions {
   apiKey: string;
   linearImport: LinearImport;
   project: ProjectPlan;
   logger: AgentLogger;
+  /** Max concurrent Linear API calls (default: 3). */
+  maxConcurrent?: number;
 }
 
 /**
@@ -20,7 +23,12 @@ export interface LinearSyncOptions {
  * (uses the first available team for the authenticated user).
  */
 export async function syncToLinear(options: LinearSyncOptions): Promise<LinearSyncResult> {
-  const { apiKey, linearImport, project, logger } = options;
+  const { apiKey, linearImport, project, logger, maxConcurrent = 3 } = options;
+
+  // Concurrency limiter for Linear API calls.
+  // Linear's GraphQL API has rate limits; keeping this conservative (default 3)
+  // avoids hitting them while still allowing some parallelism within each group.
+  const sem = new Semaphore(maxConcurrent);
 
   const result: LinearSyncResult = {
     projectUrl: null,
@@ -66,38 +74,51 @@ export async function syncToLinear(options: LinearSyncOptions): Promise<LinearSy
     return result;
   }
 
-  // ── Step 2: Create labels ──
+  // ── Step 2: Create labels (parallel with concurrency limit) ──
   const labelIdMap = new Map<string, string>();
-  for (const labelName of linearImport.labels) {
-    try {
-      const payload = await client.createIssueLabel({
-        name: labelName,
-        teamId,
-        color: labelColor(labelName),
-      });
-      const label = await payload.issueLabel;
-      if (label) {
-        labelIdMap.set(labelName, label.id);
-        result.labelIds.push(label.id);
-        result.created++;
-      }
-    } catch (err) {
-      // Label may already exist — try to find it
-      try {
-        const existing = await client.issueLabels({ filter: { name: { eq: labelName } } });
-        const found = existing.nodes[0];
-        if (found) {
-          labelIdMap.set(labelName, found.id);
-          result.labelIds.push(found.id);
-          result.skipped++;
-        } else {
-          throw new Error("not found");
+  const labelResults = await Promise.all(
+    linearImport.labels.map((labelName) =>
+      sem.run(async () => {
+        try {
+          const payload = await client.createIssueLabel({
+            name: labelName,
+            teamId,
+            color: labelColor(labelName),
+          });
+          const label = await payload.issueLabel;
+          if (label) {
+            return { status: "created" as const, labelName, labelId: label.id };
+          }
+          return { status: "failed" as const, labelName, error: "No label returned" };
+        } catch (err) {
+          // Label may already exist — try to find it
+          try {
+            const existing = await client.issueLabels({ filter: { name: { eq: labelName } } });
+            const found = existing.nodes[0];
+            if (found) {
+              return { status: "skipped" as const, labelName, labelId: found.id };
+            }
+            throw new Error("not found");
+          } catch {
+            return { status: "failed" as const, labelName, error: err instanceof Error ? err.message : String(err) };
+          }
         }
-      } catch {
-        const msg = `Failed to create label "${labelName}": ${err instanceof Error ? err.message : String(err)}`;
-        logger.info(`Linear sync warning: ${msg}`);
-        result.errors.push(msg);
-      }
+      }),
+    ),
+  );
+  for (const lr of labelResults) {
+    if (lr.status === "created") {
+      labelIdMap.set(lr.labelName, lr.labelId);
+      result.labelIds.push(lr.labelId);
+      result.created++;
+    } else if (lr.status === "skipped") {
+      labelIdMap.set(lr.labelName, lr.labelId);
+      result.labelIds.push(lr.labelId);
+      result.skipped++;
+    } else {
+      const msg = `Failed to create label "${lr.labelName}": ${lr.error}`;
+      logger.info(`Linear sync warning: ${msg}`);
+      result.errors.push(msg);
     }
   }
 
@@ -140,55 +161,81 @@ export async function syncToLinear(options: LinearSyncOptions): Promise<LinearSy
     }
   }
 
-  // ── Step 5: Create cycles ──
+  // ── Step 5: Create cycles (parallel with concurrency limit) ──
   const cycleIdMap = new Map<string, string>();
-  for (const cycle of linearImport.cycles) {
-    try {
-      const payload = await client.createCycle({
-        name: cycle.name,
-        teamId,
-        startsAt: new Date(cycle.startsAt),
-        endsAt: new Date(cycle.endsAt),
-      });
-      const createdCycle = await payload.cycle;
-      if (createdCycle) {
-        cycleIdMap.set(cycle.name, createdCycle.id);
-        result.cycleUrls.push(`https://linear.app/cycle/${createdCycle.number}`);
-        result.created++;
-        logger.info(`Linear sync: created cycle "${cycle.name}" (#${createdCycle.number})`);
-      }
-    } catch (err) {
-      const msg = `Failed to create cycle "${cycle.name}": ${err instanceof Error ? err.message : String(err)}`;
+  const cycleResults = await Promise.all(
+    linearImport.cycles.map((cycle) =>
+      sem.run(async () => {
+        try {
+          const payload = await client.createCycle({
+            name: cycle.name,
+            teamId,
+            startsAt: new Date(cycle.startsAt),
+            endsAt: new Date(cycle.endsAt),
+          });
+          const createdCycle = await payload.cycle;
+          if (createdCycle) {
+            return { status: "created" as const, cycleName: cycle.name, cycleId: createdCycle.id, number: createdCycle.number };
+          }
+          return { status: "failed" as const, cycleName: cycle.name, error: "No cycle returned" };
+        } catch (err) {
+          return { status: "failed" as const, cycleName: cycle.name, error: err instanceof Error ? err.message : String(err) };
+        }
+      }),
+    ),
+  );
+  for (const cr of cycleResults) {
+    if (cr.status === "created") {
+      cycleIdMap.set(cr.cycleName, cr.cycleId);
+      result.cycleUrls.push(`https://linear.app/cycle/${cr.number}`);
+      result.created++;
+      logger.info(`Linear sync: created cycle "${cr.cycleName}" (#${cr.number})`);
+    } else {
+      const msg = `Failed to create cycle "${cr.cycleName}": ${cr.error}`;
       logger.info(`Linear sync warning: ${msg}`);
       result.errors.push(msg);
     }
   }
 
-  // ── Step 6: Create issues ──
-  for (const issue of linearImport.issues) {
-    try {
-      const issueLabelIds = issue.labels
-        .map((l) => labelIdMap.get(l))
-        .filter((id): id is string => Boolean(id));
+  // ── Step 6: Create issues (parallel with concurrency limit) ──
+  const issueResults = await Promise.all(
+    linearImport.issues.map((issue) =>
+      sem.run(async () => {
+        try {
+          const issueLabelIds = issue.labels
+            .map((l) => labelIdMap.get(l))
+            .filter((id): id is string => Boolean(id));
 
-      const cycleId = issue.cycleName ? cycleIdMap.get(issue.cycleName) : undefined;
+          const cycleId = issue.cycleName ? cycleIdMap.get(issue.cycleName) : undefined;
 
-      const payload = await client.createIssue({
-        title: issue.title,
-        description: issue.description,
-        teamId,
-        labelIds: issueLabelIds.length > 0 ? issueLabelIds : undefined,
-        priority: linearPriority(issue.priority),
-        ...(cycleId ? { cycleId } : {}),
-      });
+          const payload = await client.createIssue({
+            title: issue.title,
+            description: issue.description,
+            teamId,
+            labelIds: issueLabelIds.length > 0 ? issueLabelIds : undefined,
+            priority: linearPriority(issue.priority),
+            ...(cycleId ? { cycleId } : {}),
+          });
 
-      const createdIssue = await payload.issue;
-      if (createdIssue) {
-        result.issueUrls.push(createdIssue.url);
-        result.created++;
-      }
-    } catch (err) {
-      const msg = `Failed to create issue "${issue.title}": ${err instanceof Error ? err.message : String(err)}`;
+          const createdIssue = await payload.issue;
+          if (createdIssue) {
+            return { status: "created" as const, url: createdIssue.url };
+          }
+          return { status: "failed" as const, error: "No issue returned" };
+        } catch (err) {
+          return { status: "failed" as const, error: err instanceof Error ? err.message : String(err) };
+        }
+      }),
+    ),
+  );
+  for (let i = 0; i < issueResults.length; i++) {
+    const ir = issueResults[i];
+    if (ir.status === "created") {
+      result.issueUrls.push(ir.url);
+      result.created++;
+    } else {
+      const issueTitle = linearImport.issues[i]?.title ?? "unknown";
+      const msg = `Failed to create issue "${issueTitle}": ${ir.error}`;
       logger.info(`Linear sync warning: ${msg}`);
       result.errors.push(msg);
       result.skipped++;

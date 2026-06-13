@@ -13,7 +13,7 @@
  */
 
 import { startDashboardServer, broadcastEvent, updateStatus } from "./server.js";
-import type { AgentEvent } from "../observability/events.js";
+import { generateEventId, generateRunId } from "../observability/events.js";
 
 // ── Org chart definition (role, parent, label) ──
 const ORG: { role: string; parent: string; label: string }[] = [
@@ -68,45 +68,53 @@ async function runMockOrchestration(port: number): Promise<void> {
 
   const completed = new Set<string>();
   let gateEmitted = false;
+  const runId = generateRunId();
+
+  // Phase 12: run summary metrics
+  const failedRoles = new Set<string>(); // none fail in mock
+  const totalAgents = ORG.length;
 
   for (let i = 0; i < ORG.length; i++) {
     const agent = ORG[i];
     const now = new Date().toISOString();
 
     // Spawn event
-    const spawnEvent: AgentEvent = {
+    broadcastEvent({
       type: "spawn",
       timestamp: now,
+      eventId: generateEventId(),
+      runId,
       from: agent.parent || undefined,
       to: agent.role,
-      summary: `${agent.parent || "CEO"} → spawning → ${agent.label}`,
-    };
-    broadcastEvent(spawnEvent);
+      summary: `${agent.parent || "CEO"} -> spawning -> ${agent.label}`,
+    });
 
     // Simulate work time (200-600ms)
     await sleep(randomDelay(200, 600));
 
     // Complete event
-    const completeEvent: AgentEvent = {
+    broadcastEvent({
       type: "complete",
       timestamp: new Date().toISOString(),
+      eventId: generateEventId(),
+      runId,
       role: agent.role,
       summary: `${agent.label} completed successfully`,
-    };
-    broadcastEvent(completeEvent);
+    });
     completed.add(agent.role);
 
     // Emit approval gate halfway through
     if (i === GATE_AFTER && !gateEmitted) {
       gateEmitted = true;
       await sleep(500);
-      const gateEvent: AgentEvent = {
+      broadcastEvent({
         type: "gate",
         timestamp: new Date().toISOString(),
+        eventId: generateEventId(),
+        runId,
         summary: `VP outputs ready: ${completed.size} agents completed. Awaiting approval...`,
-      };
-      broadcastEvent(gateEvent);
-      console.log("  ⏸  Approval gate emitted — check the dashboard for the gate banner");
+      });
+      console.log("  [pause] Approval gate emitted -- check the dashboard for the gate banner");
       await sleep(4000); // pause so user can see the gate state
     }
 
@@ -114,15 +122,25 @@ async function runMockOrchestration(port: number): Promise<void> {
     await sleep(randomDelay(100, 300));
   }
 
-  // Final summary event
+  // Phase 12: run summary event
   broadcastEvent({
-    type: "info",
+    type: "run_summary",
     timestamp: new Date().toISOString(),
-    summary: `All ${ORG.length} agents completed. Total tokens: ~7,200`,
+    eventId: generateEventId(),
+    runId,
+    summary: `All ${totalAgents} agents completed in mock run`,
+    metrics: {
+      totalAgents,
+      succeeded: completed.size,
+      failed: failedRoles.size,
+      retried: 0,
+      totalTokens: { input: 36000, output: 18000 },
+      totalDurationMs: totalAgents * 500,
+    },
   });
 
   updateStatus("complete");
-  console.log(`\n  ✓ Mock orchestration complete — ${ORG.length} agents finished`);
+  console.log(`\n  Mock orchestration complete -- ${ORG.length} agents finished`);
   console.log("  Dashboard will stay alive for 30s. Press Ctrl+C to exit early.\n");
 
   // Keep server alive for inspection

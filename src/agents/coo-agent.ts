@@ -2,6 +2,12 @@ import type { AgentResult } from "../types/agent-types.js";
 import { runAgentWithRetry, type AgentContext } from "./base-agent.js";
 import { runOperationsICs } from "./ic-agents.js";
 
+/**
+ * Run the COO (Chief Operating Officer) orchestrator agent.
+ *
+ * Produces an operations plan, then spawns Scheduler, Workflow, and Monitoring
+ * agents in parallel. Aggregates all operations IC results.
+ */
 export async function runCOOAgent(
   idea: string,
   ctx: AgentContext,
@@ -55,7 +61,7 @@ export async function runCOOAgent(
       input: Math.floor(totalTokens * 0.6),
       output: Math.floor(totalTokens * 0.4),
     },
-    durationMs: planResult.durationMs + Math.max(...icResults.map((r) => r.durationMs)),
+    durationMs: planResult.durationMs + (icResults.length > 0 ? Math.max(...icResults.map((r) => r.durationMs)) : 0),
     error: failedICs.length > 0 ? `IC failures: ${failedICs.map((r) => r.role).join(", ")}` : undefined,
     icResults,
   };

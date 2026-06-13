@@ -1,22 +1,10 @@
 import type { AgentRole, CritiqueResult } from "../types/agent-types.js";
+import { extractJsonBlock } from "../agents/base-agent.js";
 
 const SEVERITY_LEVELS = ["critical", "high", "medium", "low", "none"] as const;
 
-/**
- * Extract a structured JSON block from agent output text.
- * Looks for ```json ... ``` fences and parses the content.
- */
-export function extractJsonBlock(text: string): Record<string, unknown> | null {
-  const jsonMatch = text.match(/```json\s*([\s\S]*?)\s*```/);
-  if (jsonMatch) {
-    try {
-      return JSON.parse(jsonMatch[1]);
-    } catch {
-      return null;
-    }
-  }
-  return null;
-}
+// Re-export extractJsonBlock for use by refinement-phase.ts consumers
+export { extractJsonBlock };
 
 /**
  * Parse a structured critique from reviewer agent output.

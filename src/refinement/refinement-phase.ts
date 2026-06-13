@@ -57,8 +57,13 @@ export async function runRefinementPhase(
   const critiques = reviewResults.filter((c): c is CritiqueResult => c !== null);
   ctx.logger.info(`Refinement: ${critiques.length}/${reviewPairs.length} reviews completed`);
 
-  // Write critiques to disk
-  await writeCritiquesToDisk(critiques, ctx.outputBase);
+  // Write critiques to disk (non-fatal: if disk write fails, refinement continues)
+  try {
+    await writeCritiquesToDisk(critiques, ctx.outputBase);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    ctx.logger.info(`Refinement: failed to write critiques to disk (non-fatal): ${msg}`);
+  }
 
   // ── Step 2: Filter by severity ──
   const actionable = critiques.filter((c) => (SEVERITY_RANK[c.severity] ?? 0) >= minRank);
@@ -88,7 +93,14 @@ export async function runRefinementPhase(
     for (const result of refinementResults) {
       if (result) {
         refinements.set(result.refinedResult.role, result);
-        registry.publish(result.refinedResult);
+        // SECURITY: wrap in try/catch so a registry validation failure (e.g.,
+        // malformed output from a refinement agent) doesn't crash the phase.
+        try {
+          registry.publish(result.refinedResult);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          ctx.logger.info(`Refinement: registry publish failed for ${result.refinedResult.role}: ${msg}`);
+        }
       }
     }
   }
@@ -120,19 +132,10 @@ async function runSingleReview(
     return null;
   }
 
-  const revieweeSummary = registry.getSummary(pair.reviewee) ?? revieweeResult.summary;
-
-  // Read the reviewee's full output from disk if available
-  let revieweeOutput = revieweeSummary;
-  try {
-    const { readFileIfExists } = await import("../tools/file-tools.js");
-    if (revieweeResult.artifacts.length > 0) {
-      const content = await readFileIfExists(revieweeResult.artifacts[0]);
-      if (content) revieweeOutput = content;
-    }
-  } catch {
-    // Fall back to summary
-  }
+  // Prefer registry summary for cross-agent reading (no disk I/O).
+  // The summary is sufficient for cross-functional critique and avoids reading
+  // potentially large output files (~1-5KB each) from disk.
+  const revieweeOutput = registry.getSummary(pair.reviewee) ?? revieweeResult.summary;
 
   const outputPath = `${ctx.outputBase}/refinement/reviews/${pair.reviewer}-${pair.reviewee}`;
   const reviewPair = {
@@ -150,13 +153,12 @@ async function runSingleReview(
   const reviewSpec = {
     id: `review-${pair.reviewer}-${pair.reviewee}-${Date.now()}`,
     role: pair.reviewer,
-    task: reviewUserMessage,
+    task: `${reviewSystemPrompt}\n\n---\n\n${reviewUserMessage}`,
     context: "",
     outputPath,
   };
 
-  // Run the reviewer with a custom system prompt via the context
-  // We override by passing the review instructions as the task
+  // Run the reviewer with a custom system prompt prepended to the task
   const reviewCtx: AgentContext = {
     ...ctx,
     logger: ctx.logger,
@@ -169,8 +171,9 @@ async function runSingleReview(
     return null;
   }
 
-  // Read the review output
-  let reviewText = result.summary;
+  // Read the full review output from disk so parseCritique can extract the JSON block.
+  // The result.summary only contains the parsed summary string, not the full output with JSON.
+  let reviewText = result.summary || "";
   try {
     const { readFileIfExists } = await import("../tools/file-tools.js");
     const content = await readFileIfExists(`${outputPath}/output.md`);
@@ -191,6 +194,7 @@ async function runSingleReview(
 
 /**
  * Run a single refinement — re-spawn an agent with its critiques.
+ * Iterates up to maxIterations times, incorporating critiques each round.
  */
 async function runSingleRefinement(
   idea: string,
@@ -203,55 +207,63 @@ async function runSingleRefinement(
   const originalResult = registry.get(role);
   if (!originalResult) return null;
 
-  ctx.logger.info(`Refinement: ${role} incorporating ${critiques.length} critique(s)…`);
+  ctx.logger.info(`Refinement: ${role} incorporating ${critiques.length} critique(s) (max ${maxIterations} iterations)…`);
 
-  // Read original full output from disk
-  let originalOutput = originalResult.summary;
-  try {
-    const { readFileIfExists } = await import("../tools/file-tools.js");
-    if (originalResult.artifacts.length > 0) {
-      const content = await readFileIfExists(originalResult.artifacts[0]);
-      if (content) originalOutput = content;
-    }
-  } catch {
-    // Fall back to summary
-  }
+  // Use registry summary for refinement input (already contains key outputs).
+  // Avoids reading full output from disk — the LLM's parsed summary is sufficient
+  // for incorporating cross-functional critiques.
+  let currentOutput = originalResult.summary;
 
-  const refinedOutputPath = `${originalResult.outputPath}/refined`;
-  const refinementUserMessage = getRefinementUserMessage(role, originalOutput, critiques, idea);
+  let lastSuccessfulResult = originalResult;
+  let finalIteration = 0;
 
-  const refineSpec = {
-    id: `refine-${role}-${Date.now()}`,
-    role,
-    task: refinementUserMessage,
-    context: "",
-    outputPath: refinedOutputPath,
-  };
+  for (let iter = 1; iter <= maxIterations; iter++) {
+    const refinedOutputPath = `${originalResult.outputPath}/refined`;
+    const refinementSystemPrompt = getRefinementSystemPrompt(role);
+    const refinementUserMessage = getRefinementUserMessage(role, currentOutput, critiques, idea);
 
-  const refineCtx: AgentContext = { ...ctx };
-  const refinedResult = await runAgentWithRetry(refineSpec, refineCtx);
-
-  if (refinedResult.status === "failed") {
-    ctx.logger.info(`Refinement: ${role} refinement failed, keeping original`);
-    return {
-      originalResult,
-      refinedResult: originalResult, // Keep original on failure
-      critiques,
-      iteration: 1,
+    const refineSpec = {
+      id: `refine-${role}-iter${iter}-${Date.now()}`,
+      role,
+      task: `${refinementSystemPrompt}\n\n---\n\n${refinementUserMessage}`,
+      context: "",
+      outputPath: refinedOutputPath,
     };
+
+    const refineCtx: AgentContext = { ...ctx };
+    const refinedResult = await runAgentWithRetry(refineSpec, refineCtx);
+
+    if (refinedResult.status === "failed") {
+      ctx.logger.info(`Refinement: ${role} iteration ${iter} failed, keeping previous result`);
+      break;
+    }
+
+    lastSuccessfulResult = {
+      ...refinedResult,
+      role,
+      outputPath: refinedOutputPath,
+    };
+    finalIteration = iter;
+
+    // Use the refined result summary as input for next iteration.
+    // Avoids re-reading from disk — the LLM output is already in memory.
+    currentOutput = refinedResult.summary || currentOutput;
+
+    ctx.logger.info(`Refinement: ${role} iteration ${iter}/${maxIterations} complete`);
   }
 
-  ctx.logger.info(`Refinement: ${role} refined successfully`);
+  if (finalIteration === 0) {
+    // All iterations failed — keep original, return null so caller skips this agent
+    return null;
+  }
+
+  ctx.logger.info(`Refinement: ${role} refined after ${finalIteration} iteration(s)`);
 
   return {
     originalResult,
-    refinedResult: {
-      ...refinedResult,
-      role, // Ensure role is set correctly
-      outputPath: refinedOutputPath,
-    },
+    refinedResult: lastSuccessfulResult,
     critiques,
-    iteration: 1 <= maxIterations ? 1 : maxIterations,
+    iteration: finalIteration,
   };
 }
 

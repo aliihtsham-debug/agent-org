@@ -2,6 +2,12 @@ import type { AgentResult } from "../types/agent-types.js";
 import { runAgentWithRetry, type AgentContext } from "./base-agent.js";
 import { runFinanceICs } from "./ic-agents.js";
 
+/**
+ * Run the CFO (Chief Financial Officer) orchestrator agent.
+ *
+ * Produces a financial overview, then spawns Budget Agent and Pricing Agent
+ * in parallel. Aggregates both finance IC results.
+ */
 export async function runCFOAgent(
   idea: string,
   ctx: AgentContext,
@@ -55,7 +61,7 @@ export async function runCFOAgent(
       input: Math.floor(totalTokens * 0.6),
       output: Math.floor(totalTokens * 0.4),
     },
-    durationMs: overviewResult.durationMs + Math.max(...icResults.map((r) => r.durationMs)),
+    durationMs: overviewResult.durationMs + (icResults.length > 0 ? Math.max(...icResults.map((r) => r.durationMs)) : 0),
     error: failedICs.length > 0 ? `IC failures: ${failedICs.map((r) => r.role).join(", ")}` : undefined,
     icResults,
   };

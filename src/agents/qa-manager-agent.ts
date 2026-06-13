@@ -2,6 +2,12 @@ import type { AgentResult } from "../types/agent-types.js";
 import { runAgentWithRetry, type AgentContext } from "./base-agent.js";
 import { runQAICs } from "./ic-agents.js";
 
+/**
+ * Run the QA Manager orchestrator agent.
+ *
+ * Produces a QA strategy, then spawns Testing Agent and Performance Agent
+ * in parallel. Aggregates both QA IC results.
+ */
 export async function runQAManagerAgent(
   idea: string,
   ctx: AgentContext,
@@ -57,7 +63,7 @@ export async function runQAManagerAgent(
       input: Math.floor(totalTokens * 0.6),
       output: Math.floor(totalTokens * 0.4),
     },
-    durationMs: strategyResult.durationMs + Math.max(...icResults.map((r) => r.durationMs)),
+    durationMs: strategyResult.durationMs + (icResults.length > 0 ? Math.max(...icResults.map((r) => r.durationMs)) : 0),
     error: failedICs.length > 0 ? `IC failures: ${failedICs.map((r) => r.role).join(", ")}` : undefined,
     icResults,
   };

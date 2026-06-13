@@ -67,7 +67,12 @@ export class AgentMessageBus {
     const handlers = this.subscribers.get(message.to);
     if (handlers) {
       for (const handler of handlers) {
-        handler(message);
+        try {
+          handler(message);
+        } catch (err) {
+          // Isolate subscriber failures
+          console.error("[AgentMessageBus] subscriber error:", err);
+        }
       }
     }
   }

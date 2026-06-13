@@ -2,6 +2,12 @@ import type { AgentResult } from "../types/agent-types.js";
 import { runAgentWithRetry, type AgentContext } from "./base-agent.js";
 import { runPMICs } from "./ic-agents.js";
 
+/**
+ * Run the PM (Product Manager) orchestrator agent.
+ *
+ * Produces a product strategy overview, then spawns UX Researcher,
+ * Roadmap Agent, and Analytics Agent in parallel. Aggregates all IC results.
+ */
 export async function runPMAgent(
   idea: string,
   ctx: AgentContext,
@@ -55,7 +61,8 @@ export async function runPMAgent(
       input: Math.floor(totalTokens * 0.6),
       output: Math.floor(totalTokens * 0.4),
     },
-    durationMs: overviewResult.durationMs + Math.max(...icResults.map((r) => r.durationMs)),
+    durationMs: overviewResult.durationMs + (icResults.length > 0 ? Math.max(...icResults.map((r) => r.durationMs)) : 0),
+
     error: failedICs.length > 0 ? `IC failures: ${failedICs.map((r) => r.role).join(", ")}` : undefined,
     icResults,
   };

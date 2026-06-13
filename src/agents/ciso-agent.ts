@@ -2,6 +2,12 @@ import type { AgentResult } from "../types/agent-types.js";
 import { runAgentWithRetry, type AgentContext } from "./base-agent.js";
 import { runSecurityICs } from "./ic-agents.js";
 
+/**
+ * Run the CISO (Chief Information Security Officer) orchestrator agent.
+ *
+ * Produces a security strategy, then spawns Security Auditor, Vulnerability Scanner,
+ * and Compliance Agent in parallel. Aggregates all security IC results.
+ */
 export async function runCISOAgent(
   idea: string,
   ctx: AgentContext,
@@ -55,7 +61,7 @@ export async function runCISOAgent(
       input: Math.floor(totalTokens * 0.6),
       output: Math.floor(totalTokens * 0.4),
     },
-    durationMs: strategyResult.durationMs + Math.max(...icResults.map((r) => r.durationMs)),
+    durationMs: strategyResult.durationMs + (icResults.length > 0 ? Math.max(...icResults.map((r) => r.durationMs)) : 0),
     error: failedICs.length > 0 ? `IC failures: ${failedICs.map((r) => r.role).join(", ")}` : undefined,
     icResults,
   };

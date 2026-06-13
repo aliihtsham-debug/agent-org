@@ -231,7 +231,9 @@ Write the JSON file to: ${outputPath}/linear-import.json`;
 }
 
 /**
- * Build a human-readable list of agent output paths for the mapper agent.
+ * Build a compact summary of agent outputs for the mapper agent.
+ * Uses registry summaries instead of file paths to avoid unnecessary disk I/O
+ * and reduce token consumption. Each entry includes the role and its summary.
  */
 function buildAgentOutputList(
   idea: string,
@@ -244,11 +246,10 @@ function buildAgentOutputList(
     const result = registry.get(role);
     if (!result || result.status === "failed") continue;
 
-    // Use the first artifact (usually output.md)
-    const artifact = result.artifacts[0];
-    if (artifact) {
-      lines.push(`- **${role}**: ${artifact} — ${result.summary.slice(0, 100)}`);
-    }
+    // Include the registry summary directly — avoids LLM needing to read files.
+    // Truncate each summary to 200 chars to keep mapper context manageable.
+    const summary = result.summary.slice(0, 200);
+    lines.push(`- **${role}**: ${summary}`);
   }
 
   return lines.length > 0

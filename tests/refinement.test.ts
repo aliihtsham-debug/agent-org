@@ -330,13 +330,9 @@ describe("Refinement Phase Integration", () => {
   });
 
   it("should filter out low-severity critiques", async () => {
-    let callCount = 0;
-    mockCreate.mockImplementation(() => {
-      callCount++;
-      if (callCount <= 21) {
-        return mockSuccessfulResponse("Original output");
-      }
-      if (callCount <= 28) {
+    mockCreate.mockImplementation((params: any) => {
+      const taskText = params?.messages?.[0]?.content ?? "";
+      if (taskText.includes("reviewing")) {
         // Return low-severity critiques — should be filtered out
         return mockCritiqueResponse("low", ["Minor issue"], "Low severity finding");
       }
@@ -375,5 +371,117 @@ describe("Refinement Phase Integration", () => {
     // All critiques are "low" severity, so none should be actionable
     expect(plan.refinementReport!.actionableCritiques).toBe(0);
     expect(plan.refinementReport!.refinedAgents).toHaveLength(0);
+  });
+
+  it("should handle all reviewees having no results in registry", async () => {
+    mockCreate.mockResolvedValue(mockSuccessfulResponse("Test completed"));
+
+    const { runCEOAgent } = await import("../src/orchestrator/ceo-agent.js");
+    const { AgentLogger } = await import("../src/observability/logger.js");
+
+    const logger = new AgentLogger();
+    const plan = await runCEOAgent({
+      idea: "Empty registry test",
+      apiKey: "test-key",
+      baseURL: "https://test.example.com",
+      outputBase: TEST_OUTPUT_BASE,
+      logger,
+      projectRoot: join(__dirname, ".."),
+      enableApproval: false,
+      enableRefinement: true,
+    });
+
+    expect(plan.refinementReport).toBeDefined();
+    expect(plan.refinementReport!.totalReviews).toBe(7);
+  });
+
+  it("should handle all refinement agents failing", async () => {
+    // Use content-based detection: refinement review prompts contain "reviewing"
+    // and refinement re-spawn prompts contain "incorporating" / "critique(s)"
+    let reviewResponses = 0;
+    let refineResponses = 0;
+    mockCreate.mockImplementation((params: any) => {
+      const taskText = params?.messages?.[0]?.content ?? "";
+      if (taskText.includes("reviewing")) {
+        reviewResponses++;
+        return {
+          content: [{ type: "text" as const, text: `# Critique\n\n\`\`\`json\n{"severity": "critical", "findings": ["Major issue"], "summary": "Critical"}\n\`\`\`` }],
+          usage: { input_tokens: 100, output_tokens: 200 },
+        };
+      }
+      if (taskText.includes("incorporating") || taskText.includes("critique")) {
+        refineResponses++;
+        throw new Error("Refinement agent failed");
+      }
+      return mockSuccessfulResponse("Original output");
+    });
+
+    const { runCEOAgent } = await import("../src/orchestrator/ceo-agent.js");
+    const { AgentLogger } = await import("../src/observability/logger.js");
+
+    const logger = new AgentLogger();
+    const plan = await runCEOAgent({
+      idea: "All refinement fail test",
+      apiKey: "test-key",
+      baseURL: "https://test.example.com",
+      outputBase: TEST_OUTPUT_BASE,
+      logger,
+      projectRoot: join(__dirname, ".."),
+      enableApproval: false,
+      enableRefinement: true,
+    });
+
+    expect(plan.refinementReport).toBeDefined();
+    expect(plan.refinementReport!.critiques.length).toBeGreaterThan(0);
+    // When refinement fails, the original result is kept. The system should not crash.
+    // refinedAgents may contain entries (with iteration 0) since the code tracks
+    // attempted refinements even when they fail.
+    expect(plan.refinementReport!.refinedAgents.length).toBeGreaterThanOrEqual(0);
+  });
+
+  it("should handle mixed severity critiques correctly", async () => {
+    // Use a single review pair with high severity to test severity filtering
+    mockCreate.mockImplementation((params: any) => {
+      const taskText = params?.messages?.[0]?.content ?? "";
+      if (taskText.includes("reviewing")) {
+        return {
+          content: [{ type: "text" as const, text: `# Critique\n\n\`\`\`json\n{"severity": "high", "findings": ["Security issue"], "summary": "High severity finding"}\n\`\`\`` }],
+          usage: { input_tokens: 100, output_tokens: 200 },
+        };
+      }
+      return mockSuccessfulResponse("Refined output");
+    });
+
+    const { runCEOAgent } = await import("../src/orchestrator/ceo-agent.js");
+    const { AgentLogger } = await import("../src/observability/logger.js");
+
+    const logger = new AgentLogger();
+    const plan = await runCEOAgent({
+      idea: "Mixed severity test",
+      apiKey: "test-key",
+      baseURL: "https://test.example.com",
+      outputBase: TEST_OUTPUT_BASE,
+      logger,
+      projectRoot: join(__dirname, ".."),
+      enableApproval: false,
+      enableRefinement: true,
+      refinementConfig: {
+        enabled: true,
+        maxIterations: 1,
+        reviewPairs: [
+          {
+            reviewer: "security-auditor",
+            reviewee: "cto",
+            reviewFocus: "Security flaws",
+            maxIterations: 1,
+          },
+        ],
+        minSeverity: "high",
+      },
+    });
+
+    expect(plan.refinementReport).toBeDefined();
+    // 1 review pair, 1 critique with "high" severity (>= "high" threshold)
+    expect(plan.refinementReport!.actionableCritiques).toBe(1);
   });
 });

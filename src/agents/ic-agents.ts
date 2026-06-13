@@ -48,7 +48,7 @@ export function createICTask(
   const subdir = outputDir(role);
   const outputPath = `${outputBase}/${subdir}/${role}`;
 
-  let task: string;
+  let task: string; // reassigned in switch cases below
   switch (role) {
     // ── Engineering ──────────────────────────────────────────────────
     case "frontend-engineer":
@@ -134,8 +134,16 @@ export async function runICAgent(
 ): Promise<AgentResult> {
   const task = createICTask(role, idea, architectureSummary, productSummary, ctx.outputBase, extraContext);
   const result = await runAgentWithRetry(task, ctx);
-  // Publish to registry so sibling and cross-branch agents can access this result
-  ctx.resultsRegistry.publish(result);
+  // Publish to registry so sibling and cross-branch agents can access this result.
+  // SECURITY: wrap in try/catch so a registry validation failure doesn't crash
+  // the entire orchestration. A poisoned/corrupt result is still returned to the
+  // caller so the VP can report the failure, but it won't be published.
+  try {
+    ctx.resultsRegistry.publish(result);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    ctx.logger.info(`${role} registry publish failed: ${msg}`);
+  }
   return result;
 }
 

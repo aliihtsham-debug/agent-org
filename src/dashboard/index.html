@@ -26,13 +26,24 @@
     .status-failed { background: #3a1a1a; color: var(--red); }
 
     /* ── Stats bar ── */
-    #stats-bar { padding: 12px 24px; border-bottom: 1px solid var(--border); display: flex; gap: 24px; font-size: 13px; background: var(--surface); }
+    #stats-bar { padding: 12px 24px; border-bottom: 1px solid var(--border); display: flex; gap: 24px; font-size: 13px; background: var(--surface); flex-wrap: wrap; }
     .stat { display: flex; align-items: center; gap: 6px; }
     .stat-label { color: var(--muted); }
     .stat-value { font-weight: 600; }
     .stat-green { color: var(--green); }
     .stat-red { color: var(--red); }
     .stat-blue { color: var(--blue); }
+    .stat-yellow { color: var(--yellow); }
+    .stat-purple { color: var(--purple); }
+
+    /* ── Run summary banner ── */
+    #run-summary { display: none; padding: 16px 24px; border-bottom: 2px solid var(--blue); background: linear-gradient(90deg, #1a1d27 0%, #1e2a3a 100%); }
+    #run-summary.visible { display: block; }
+    #run-summary h2 { font-size: 14px; font-weight: 600; color: var(--blue); margin-bottom: 8px; }
+    #run-summary .metrics-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
+    #run-summary .metric-card { padding: 8px 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; }
+    #run-summary .metric-card .label { font-size: 11px; color: var(--muted); display: block; }
+    #run-summary .metric-card .value { font-size: 18px; font-weight: 700; }
 
     /* ── Layout ── */
     #main { display: grid; grid-template-columns: 1fr 1fr; height: calc(100vh - 100px); }
@@ -66,6 +77,9 @@
     .type-retry { color: var(--orange); }
     .type-info { color: var(--muted); }
     .type-gate { color: var(--yellow); }
+    .type-run_summary { color: var(--purple); }
+    .type-review { color: var(--orange); }
+    .type-refine { color: var(--orange); }
 
     /* ── Approval banner ── */
     #approval-panel { display: none; position: fixed; bottom: 0; left: 0; right: 0; padding: 16px 24px; background: #4a3f1e; border-top: 2px solid var(--yellow); z-index: 10; }
@@ -91,6 +105,19 @@
   <div class="stat"><span class="stat-label">Failed:</span><span class="stat-value stat-red" id="stat-failed">0</span></div>
   <div class="stat"><span class="stat-label">Total Events:</span><span class="stat-value stat-blue" id="stat-events">0</span></div>
   <div class="stat"><span class="stat-label">Elapsed:</span><span class="stat-value" id="stat-elapsed">0s</span></div>
+</div>
+
+<!-- Phase 12: Run summary (shown when run_summary event arrives) -->
+<div id="run-summary">
+  <h2>Run Summary</h2>
+  <div class="metrics-grid">
+    <div class="metric-card"><span class="label">Total Agents</span><span class="value stat-blue" id="rs-total">-</span></div>
+    <div class="metric-card"><span class="label">Succeeded</span><span class="value stat-green" id="rs-succeeded">-</span></div>
+    <div class="metric-card"><span class="label">Failed</span><span class="value stat-red" id="rs-failed">-</span></div>
+    <div class="metric-card"><span class="label">Retries</span><span class="value stat-yellow" id="rs-retries">-</span></div>
+    <div class="metric-card"><span class="label">Tokens (in/out)</span><span class="value stat-purple" id="rs-tokens">-</span></div>
+    <div class="metric-card"><span class="label">Duration</span><span class="value" id="rs-duration">-</span></div>
+  </div>
 </div>
 
 <div id="main">
@@ -168,7 +195,11 @@
     const label = document.createElement("div");
     label.className = "org-label";
     label.id = `node-${node.role}`;
-    label.innerHTML = `<span class="org-dot dot-pending" id="dot-${node.role}"></span>${node.label}`;
+    const dot = document.createElement("span");
+    dot.className = "org-dot dot-pending";
+    dot.id = `dot-${node.role}`;
+    label.appendChild(dot);
+    label.appendChild(document.createTextNode(node.label));
     wrapper.appendChild(label);
 
     if (node.children) {
@@ -207,7 +238,18 @@
     const item = document.createElement("div");
     item.className = "event-item";
     const time = new Date(event.timestamp).toLocaleTimeString();
-    item.innerHTML = `<span class="event-time">${time}</span><span class="event-type type-${event.type}">${event.type}</span><span class="event-msg">${event.summary || event.error || ""}</span>`;
+    const timeSpan = document.createElement("span");
+    timeSpan.className = "event-time";
+    timeSpan.textContent = time;
+    const typeSpan = document.createElement("span");
+    typeSpan.className = `event-type type-${event.type}`;
+    typeSpan.textContent = event.type;
+    const msgSpan = document.createElement("span");
+    msgSpan.className = "event-msg";
+    msgSpan.textContent = event.summary || event.error || "";
+    item.appendChild(timeSpan);
+    item.appendChild(typeSpan);
+    item.appendChild(msgSpan);
     log.insertBefore(item, log.firstChild);
   }
 
@@ -251,7 +293,18 @@
         const item = document.createElement("div");
         item.className = "event-item";
         const time = new Date(event.timestamp).toLocaleTimeString();
-        item.innerHTML = `<span class="event-time">${time}</span><span class="event-type type-${event.type}">${event.type}</span><span class="event-msg">${event.summary || event.error || ""}</span>`;
+        const timeSpan = document.createElement("span");
+        timeSpan.className = "event-time";
+        timeSpan.textContent = time;
+        const typeSpan = document.createElement("span");
+        typeSpan.className = `event-type type-${event.type}`;
+        typeSpan.textContent = event.type;
+        const msgSpan = document.createElement("span");
+        msgSpan.className = "event-msg";
+        msgSpan.textContent = event.summary || event.error || "";
+        item.appendChild(timeSpan);
+        item.appendChild(typeSpan);
+        item.appendChild(msgSpan);
         log.appendChild(item);
       }
     });
@@ -265,6 +318,8 @@
       const data = JSON.parse(e.data);
       updateStatus(data.status);
       if (data.startTime) startTime = new Date(data.startTime);
+      // Phase 12: restore run summary if present
+      if (data.metrics) showRunSummary(data.metrics);
       for (const event of data.events) {
         processEvent(event);
       }
@@ -290,11 +345,28 @@
     } else if (event.type === "gate") {
       updateStatus("waiting_approval");
     }
+    // Phase 12: run summary event
+    if (event.type === "run_summary" && event.metrics) {
+      showRunSummary(event.metrics);
+      updateStatus("complete");
+    }
 
     if (event.type === "complete" && event.role === "ceo") updateStatus("complete");
     if (event.type === "fail" && event.role === "ceo") updateStatus("failed");
 
     addEvent(event);
+  }
+
+  // Phase 12: populate and show the run summary panel
+  function showRunSummary(m) {
+    document.getElementById("rs-total").textContent = m.totalAgents;
+    document.getElementById("rs-succeeded").textContent = m.succeeded;
+    document.getElementById("rs-failed").textContent = m.failed;
+    document.getElementById("rs-retries").textContent = m.retried;
+    document.getElementById("rs-tokens").textContent =
+      `${m.totalTokens.input.toLocaleString()} / ${m.totalTokens.output.toLocaleString()}`;
+    document.getElementById("rs-duration").textContent = `${(m.totalDurationMs / 1000).toFixed(1)}s`;
+    document.getElementById("run-summary").classList.add("visible");
   }
 
   // Start

@@ -3,6 +3,12 @@ import { runAgentWithRetry, type AgentContext } from "./base-agent.js";
 import { runEngManagerAgent } from "./eng-manager-agent.js";
 import { runQAManagerAgent } from "./qa-manager-agent.js";
 
+/**
+ * Run the CTO (Chief Technology Officer) orchestrator agent.
+ *
+ * Produces an Architecture Decision Record, then spawns Engineering Manager
+ * and QA Manager in parallel. Collects IC results from both manager branches.
+ */
 export async function runCTOAgent(
   idea: string,
   ctx: AgentContext,
