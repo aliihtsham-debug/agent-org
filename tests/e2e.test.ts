@@ -171,4 +171,75 @@ describe("Agent Org E2E", () => {
     expect(types.has("spawn")).toBe(true);
     expect(types.has("complete")).toBe(true);
   });
+
+  it("should run refinement phase when --refine is enabled", async () => {
+    let callCount = 0;
+    mockCreate.mockImplementation(() => {
+      callCount++;
+      if (callCount <= 21) {
+        // Pass 1: normal agent responses
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `# Output\n\n\`\`\`json\n{"summary": "Original output", "artifacts": []}\n\`\`\``,
+            },
+          ],
+          usage: { input_tokens: 100, output_tokens: 200 },
+        };
+      }
+      if (callCount <= 28) {
+        // Review phase: return critiques
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `# Critique\n\nFound issues.\n\n\`\`\`json\n{"severity": "high", "findings": ["Issue 1"], "summary": "Found problems"}\n\`\`\``,
+            },
+          ],
+          usage: { input_tokens: 100, output_tokens: 200 },
+        };
+      }
+      // Refinement phase: return improved output
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `# Refined Output\n\n\`\`\`json\n{"summary": "Refined output", "artifacts": []}\n\`\`\``,
+          },
+        ],
+        usage: { input_tokens: 100, output_tokens: 200 },
+      };
+    });
+
+    const { runCEOAgent } = await import("../src/orchestrator/ceo-agent.js");
+    const { AgentLogger } = await import("../src/observability/logger.js");
+
+    const logger = new AgentLogger();
+    const plan = await runCEOAgent({
+      idea: "Refinement test product",
+      apiKey: "test-key",
+      baseURL: "https://test.example.com",
+      outputBase: TEST_OUTPUT_BASE,
+      logger,
+      projectRoot: join(__dirname, ".."),
+      enableApproval: false,
+      enableRefinement: true,
+    });
+
+    // Verify refinement report is present
+    expect(plan.refinementReport).toBeDefined();
+    expect(plan.refinementReport!.totalReviews).toBe(7);
+    expect(plan.refinementReport!.critiques.length).toBeGreaterThan(0);
+    expect(plan.refinementReport!.actionableCritiques).toBeGreaterThan(0);
+    expect(plan.refinementReport!.refinedAgents.length).toBeGreaterThan(0);
+
+    // Verify refinement artifacts on disk
+    expect(existsSync(join(TEST_OUTPUT_BASE, "refinement", "summary.md"))).toBe(true);
+    expect(existsSync(join(TEST_OUTPUT_BASE, "refinement", "critiques"))).toBe(true);
+
+    // Verify the markdown plan includes refinement section
+    const mdPlan = readFileSync(join(TEST_OUTPUT_BASE, "project-plan.md"), "utf-8");
+    expect(mdPlan).toContain("Refinement");
+  });
 });

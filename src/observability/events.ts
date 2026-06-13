@@ -5,7 +5,10 @@ export type AgentEventType =
   | "retry"
   | "info"
   | "gate"
-  | "artifact";
+  | "artifact"
+  // Phase 6 — Refinement
+  | "review"
+  | "refine";
 
 export interface AgentEvent {
   type: AgentEventType;

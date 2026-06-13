@@ -1,4 +1,4 @@
-import type { AgentResult, ProjectPlan } from "../types/agent-types.js";
+import type { AgentResult, ProjectPlan, RefinementConfig, RefinementReport } from "../types/agent-types.js";
 import { ROLE_OUTPUT_DIR } from "../types/agent-types.js";
 import { writeOutput } from "../tools/file-tools.js";
 import { runPMAgent } from "../agents/pm-agent.js";
@@ -15,6 +15,8 @@ import { buildBranchName, commitAgentArtifacts, pushBranchAndCreatePR } from "..
 import { broadcastEvent, updateStatus } from "../dashboard/server.js";
 import { AgentResultsRegistry } from "../communication/results-registry.js";
 import { AgentMessageBus } from "../communication/message-bus.js";
+import { runRefinementPhase, writeRefinementSummary } from "../refinement/refinement-phase.js";
+import { DEFAULT_REVIEW_PAIRS } from "../refinement/review-pairs.js";
 
 export interface CEOOptions {
   idea: string;
@@ -25,10 +27,14 @@ export interface CEOOptions {
   projectRoot: string;
   /** Whether to pause at milestone gates for human approval */
   enableApproval?: boolean;
+  /** Phase 6 — Enable cross-functional iterative refinement */
+  enableRefinement?: boolean;
+  /** Phase 6 — Refinement configuration (uses defaults if not provided) */
+  refinementConfig?: RefinementConfig;
 }
 
 export async function runCEOAgent(options: CEOOptions): Promise<ProjectPlan> {
-  const { idea, apiKey, baseURL, outputBase, logger, projectRoot, enableApproval = false } = options;
+  const { idea, apiKey, baseURL, outputBase, logger, projectRoot, enableApproval = false, enableRefinement = false } = options;
 
   logger.banner(`Agent Org — Product Idea: "${idea}"`);
 
@@ -100,6 +106,47 @@ export async function runCEOAgent(options: CEOOptions): Promise<ProjectPlan> {
     }
   }
 
+  // ── Phase 6: Cross-functional refinement ──
+  let refinementReport: RefinementReport | undefined;
+  if (enableRefinement) {
+    logger.info("CEO starting cross-functional refinement phase…");
+    const config: RefinementConfig = options.refinementConfig ?? {
+      enabled: true,
+      maxIterations: 1,
+      reviewPairs: DEFAULT_REVIEW_PAIRS,
+      minSeverity: "high",
+    };
+
+    const { critiques, refinements, totalReviews, actionableCritiques, refinedAgents } =
+      await runRefinementPhase(idea, ctx, registry, config);
+
+    // Update VP results with refined IC results
+    const vpResultsMutable = [pmResult, ctoResult, cisoResult, cfoResult, cooResult];
+    for (const [, refinement] of refinements) {
+      // Update the IC results within each VP result
+      for (const vpResult of vpResultsMutable) {
+        if (vpResult.icResults) {
+          vpResult.icResults = vpResult.icResults.map((ic) =>
+            ic.role === refinement.refinedResult.role ? refinement.refinedResult : ic,
+          );
+        }
+      }
+    }
+
+    // Write refinement summary to disk
+    await writeRefinementSummary(outputBase, totalReviews, actionableCritiques, refinedAgents, critiques);
+
+    refinementReport = {
+      totalReviews,
+      actionableCritiques,
+      refinedAgents,
+      critiques,
+      refinements: [...refinements.values()],
+    };
+
+    logger.info(`Refinement complete: ${refinedAgents.length} agents refined (${actionableCritiques} actionable critiques)`);
+  }
+
   // ── GATE 1: Review VP outputs before committing ──
   const vpResults = [pmResult, ctoResult, cisoResult, cfoResult, cooResult];
   const succeededVPs = vpResults.filter((r) => r.status === "completed" || r.status === "partial");
@@ -116,7 +163,7 @@ export async function runCEOAgent(options: CEOOptions): Promise<ProjectPlan> {
     );
     if (!approved) {
       logger.info("User skipped git commit. Building plan without commits.");
-      return await buildPlan(idea, outputBase, vpResults, icResults, logger, projectRoot, onArtifact);
+      return await buildPlan(idea, outputBase, vpResults, icResults, logger, projectRoot, onArtifact, refinementReport);
     }
   }
 
@@ -134,7 +181,7 @@ export async function runCEOAgent(options: CEOOptions): Promise<ProjectPlan> {
     pushBranchAndCreatePR({ projectRoot, branchName: branch, role, summary });
   }
 
-  return await buildPlan(idea, outputBase, vpResults, icResults, logger, projectRoot, onArtifact);
+  return await buildPlan(idea, outputBase, vpResults, icResults, logger, projectRoot, onArtifact, refinementReport);
 }
 
 async function buildPlan(
@@ -145,6 +192,7 @@ async function buildPlan(
   logger: AgentLogger,
   projectRoot: string,
   onArtifact: (result: AgentResult, projectRoot: string) => void,
+  refinementReport?: RefinementReport,
 ): Promise<ProjectPlan> {
   // Determine overall status
   const gaps: string[] = [];
@@ -180,6 +228,7 @@ async function buildPlan(
     icResults,
     status: allFailed ? "failed" : anyFailed || gaps.length > 0 ? "partial" : "complete",
     gaps,
+    refinementReport,
   };
 
   // Write project plan
@@ -224,11 +273,28 @@ async function writePlan(plan: ProjectPlan, outputBase: string): Promise<void> {
   const vpRows = (label: string, result: AgentResult) =>
     `| ${label} | ${result.status} | ${result.summary} | ${result.artifacts.join(", ") || "none"} |`;
 
+  const refinementSection = plan.refinementReport
+    ? `
+
+## Refinement (Phase 6)
+
+| Metric | Value |
+|--------|-------|
+| Total Reviews | ${plan.refinementReport.totalReviews} |
+| Actionable Critiques | ${plan.refinementReport.actionableCritiques} |
+| Agents Refined | ${plan.refinementReport.refinedAgents.join(", ") || "none"} |
+
+### Critiques
+
+${plan.refinementReport.critiques.map((c) => `- **${c.reviewer} → ${c.reviewee}** (${c.severity}): ${c.findings.join("; ")}`).join("\n") || "_No critiques_"}
+`
+    : "";
+
   const md = `# Project Plan: ${plan.idea}
 
 **Generated:** ${plan.timestamp}
 **Status:** ${plan.status}
-**Overall:** ${plan.gaps.length > 0 ? plan.gaps.join("; ") : "All agents completed successfully"}
+**Overall:** ${plan.gaps.length > 0 ? plan.gaps.join("; ") : "All agents completed successfully"}${refinementSection}
 
 ---
 

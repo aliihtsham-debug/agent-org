@@ -24,6 +24,7 @@ Usage:
 Options:
   --dashboard [port]  Start web dashboard (default port: 3001)
   --approve           Enable human approval gates at milestones
+  --refine            Enable cross-functional iterative refinement (Phase 6)
   --help, -h          Show this help
 
 Examples:
@@ -47,10 +48,12 @@ function parseArgs(argv: string[]): {
   dashboard: boolean;
   dashboardPort: number;
   enableApproval: boolean;
+  enableRefinement: boolean;
 } {
   let dashboard = false;
   let dashboardPort = 3001;
   let enableApproval = false;
+  let enableRefinement = false;
   const ideaParts: string[] = [];
 
   for (let i = 0; i < argv.length; i++) {
@@ -68,12 +71,14 @@ function parseArgs(argv: string[]): {
       }
     } else if (arg === "--approve") {
       enableApproval = true;
+    } else if (arg === "--refine") {
+      enableRefinement = true;
     } else {
       ideaParts.push(arg);
     }
   }
 
-  return { idea: ideaParts.join(" "), dashboard, dashboardPort, enableApproval };
+  return { idea: ideaParts.join(" "), dashboard, dashboardPort, enableApproval, enableRefinement };
 }
 
 async function main(): Promise<void> {
@@ -84,7 +89,7 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  const { idea, dashboard, dashboardPort, enableApproval } = parseArgs(rawArgs);
+  const { idea, dashboard, dashboardPort, enableApproval, enableRefinement } = parseArgs(rawArgs);
 
   if (!idea) {
     console.error("Error: No product idea provided.");
@@ -126,6 +131,7 @@ async function main(): Promise<void> {
     logger,
     projectRoot: PROJECT_ROOT,
     enableApproval,
+    enableRefinement,
   });
 
   process.exit(plan.status === "failed" ? 1 : 0);

@@ -69,6 +69,17 @@ export interface ProjectPlan {
   icResults: AgentResult[];
   status: "complete" | "partial" | "failed";
   gaps: string[];
+  /** Phase 6 — refinement metadata (only present when refinement was run) */
+  refinementReport?: RefinementReport;
+}
+
+/** Summary of the refinement phase for inclusion in the project plan. */
+export interface RefinementReport {
+  totalReviews: number;
+  actionableCritiques: number;
+  refinedAgents: string[];
+  critiques: CritiqueResult[];
+  refinements: RefinementResult[];
 }
 
 export interface DelegationLog {
@@ -77,6 +88,41 @@ export interface DelegationLog {
   to: AgentRole;
   action: "spawn" | "retry" | "complete" | "fail";
   summary: string;
+}
+
+// ── Phase 6 — Iterative Refinement ──────────────────────────────────────
+
+/** A cross-functional review assignment: one agent critiques another's work. */
+export interface ReviewPair {
+  reviewer: AgentRole;
+  reviewee: AgentRole;
+  reviewFocus: string;
+  maxIterations: number;
+}
+
+/** Result of a single cross-functional review. */
+export interface CritiqueResult {
+  reviewer: AgentRole;
+  reviewee: AgentRole;
+  critique: string;
+  severity: "critical" | "high" | "medium" | "low" | "none";
+  findings: string[];
+}
+
+/** Refinement result wrapping the improved output after incorporating critiques. */
+export interface RefinementResult {
+  originalResult: AgentResult;
+  refinedResult: AgentResult;
+  critiques: CritiqueResult[];
+  iteration: number;
+}
+
+/** Configuration for the refinement phase. */
+export interface RefinementConfig {
+  enabled: boolean;
+  maxIterations: number;
+  reviewPairs: ReviewPair[];
+  minSeverity: "critical" | "high" | "medium" | "low";
 }
 
 /**

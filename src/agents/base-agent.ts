@@ -117,6 +117,23 @@ async function gatherWebResearch(topic: string): Promise<string> {
   }
 }
 
+/**
+ * Extract a structured JSON block from agent output text.
+ * Looks for ```json ... ``` fences and parses the content.
+ * Returns null if no valid JSON block is found.
+ */
+export function extractJsonBlock(text: string): Record<string, unknown> | null {
+  const jsonMatch = text.match(/```json\s*([\s\S]*?)\s*```/);
+  if (jsonMatch) {
+    try {
+      return JSON.parse(jsonMatch[1]);
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
 export async function runAgent(
   spec: TaskSpec,
   ctx: AgentContext,
@@ -169,21 +186,16 @@ export async function runAgent(
     const outputFile = `${spec.outputPath}/output.md`;
     await writeOutput(outputFile, textBlocks);
 
-    const jsonMatch = textBlocks.match(/```json\s*([\s\S]*?)\s*```/);
+    const parsed = extractJsonBlock(textBlocks);
     let summary = "Completed";
     let artifacts: string[] = [outputFile];
 
-    if (jsonMatch) {
-      try {
-        const parsed = JSON.parse(jsonMatch[1]);
-        summary = parsed.summary ?? summary;
-        if (Array.isArray(parsed.artifacts)) {
-          artifacts = parsed.artifacts.map((a: string) =>
-            a.startsWith("/") ? a : `${spec.outputPath}/${a}`
-          );
-        }
-      } catch {
-        // JSON parse failed — use defaults
+    if (parsed) {
+      summary = (parsed.summary as string) ?? summary;
+      if (Array.isArray(parsed.artifacts)) {
+        artifacts = (parsed.artifacts as string[]).map((a) =>
+          a.startsWith("/") ? a : `${spec.outputPath}/${a}`
+        );
       }
     }
 
