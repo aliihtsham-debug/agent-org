@@ -292,10 +292,12 @@ Agent output is capped at **512 KB per agent** to prevent disk exhaustion and me
 
 ### Security Configuration
 
-| Environment Variable | Purpose |
-|---|---|
-| `DASHBOARD_TOKEN` | Enable token authentication for the web dashboard |
-| `SEMAPHORE_LIMIT` | Maximum concurrent LLM API calls (default: 5) |
+| Environment Variable | Default | Purpose |
+|---|---|---|
+| `DASHBOARD_TOKEN` | *(none)* | Enable token authentication for the web dashboard |
+| `LLM_MAX_CONCURRENT` | `8` | Maximum concurrent LLM API calls |
+| `LINEAR_MAX_CONCURRENT` | `3` | Maximum concurrent Linear API calls |
+| `DASHBOARD_MAX_EVENTS` | `1000` | Maximum events retained in dashboard buffer |
 
 ### Examples
 
@@ -726,6 +728,9 @@ agent-org/
 │   ├── types/
 │   │   └── agent-types.ts        # Shared types + ROLE_OUTPUT_DIR
 │   │
+│   ├── utils/
+│   │   └── semaphore.ts          # Concurrency limiter for LLM/Linear API calls
+│   │
 │   ├── observability/
 │   │   ├── logger.ts             # AgentLogger with event emission
 │   │   ├── events.ts             # AgentEventEmitter + AgentEvent type
@@ -738,8 +743,18 @@ agent-org/
 │       └── mock-run.ts           # Standalone mock data runner
 │
 ├── tests/
-│   ├── e2e.test.ts               # End-to-end tests (Vitest)
-│   └── linear-sync.test.ts       # Linear sync unit tests 
+│   ├── e2e.test.ts               # End-to-end integration tests (28 tests)
+│   ├── linear-sync.test.ts       # Linear sync unit tests (8 tests)
+│   ├── linear-mapper-edge.test.ts # Linear mapper edge cases (8 tests)
+│   ├── refinement.test.ts        # Refinement phase tests (18 tests)
+│   ├── base-agent.test.ts        # Base agent utilities (17 tests)
+│   ├── registry.test.ts          # Registry poisoning prevention (18 tests)
+│   ├── message-bus.test.ts       # Message bus error isolation (10 tests)
+│   ├── event-emitter.test.ts     # Event emitter error isolation (10 tests)
+│   ├── readartifact-safety.test.ts # Path traversal prevention (10 tests)
+│   ├── ceo-partial-failure.test.ts # CEO resilience (7 tests)
+│   └── semaphore.test.ts         # Concurrency limiter (5 tests)
+│                               # Total: 135 tests across 10 files
 │
 ├── outputs/                       # Agent-generated artifacts (gitignored)
 ├── dist/                          # Compiled JavaScript (build output)
