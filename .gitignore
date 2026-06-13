@@ -54,3 +54,7 @@ npm-debug.log*
 
 # TypeScript build info
 *.tsbuildinfo
+
+# Graphify knowledge graph
+graphify-out/
+.graphifyignore
