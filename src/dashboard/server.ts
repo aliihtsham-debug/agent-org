@@ -49,6 +49,7 @@ export function broadcastEvent(event: AgentEvent): void {
   }
   if (state.startTime === null) state.startTime = event.timestamp;
 
+  if (event.type === "spawn") state.status = "running";
   if (event.type === "gate") state.status = "waiting_approval";
   if (event.type === "complete" && event.role === "ceo") state.status = "complete";
   if (event.type === "fail" && event.role === "ceo") state.status = "failed";

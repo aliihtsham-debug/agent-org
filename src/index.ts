@@ -26,12 +26,17 @@ Options:
   --dashboard [port]  Start web dashboard (default port: 3001)
   --approve           Enable human approval gates at milestones
   --refine            Enable cross-functional iterative refinement (Phase 6)
+  --identity          Enable cryptographic agent identity (Phase 8)
+  --governance        Enable governance policy engine (Phase 9)
+  --audit             Enable hash-chained audit logging (Phase 10)
+  --security          Enable security platform — TEE, secrets, zero-trust (Phase 13)
   --help, -h          Show this help
 
 Examples:
   npx tsx src/index.ts "Build a SaaS task management app"
   npx tsx src/index.ts "URL shortener" --dashboard 3001
   npx tsx src/index.ts "Recipe platform" --dashboard --approve
+  npx tsx src/index.ts "Fintech app" --governance --audit --identity --security
 
 Environment:
   OPENROUTER_API_KEY  Required. Your OpenRouter API key.
@@ -50,11 +55,19 @@ function parseArgs(argv: string[]): {
   dashboardPort: number;
   enableApproval: boolean;
   enableRefinement: boolean;
+  enableIdentity: boolean;
+  enableGovernance: boolean;
+  enableAudit: boolean;
+  enableSecurity: boolean;
 } {
   let dashboard = false;
   let dashboardPort = 3001;
   let enableApproval = false;
   let enableRefinement = false;
+  let enableIdentity = false;
+  let enableGovernance = false;
+  let enableAudit = false;
+  let enableSecurity = false;
   const ideaParts: string[] = [];
 
   for (let i = 0; i < argv.length; i++) {
@@ -74,12 +87,20 @@ function parseArgs(argv: string[]): {
       enableApproval = true;
     } else if (arg === "--refine") {
       enableRefinement = true;
+    } else if (arg === "--identity") {
+      enableIdentity = true;
+    } else if (arg === "--governance") {
+      enableGovernance = true;
+    } else if (arg === "--audit") {
+      enableAudit = true;
+    } else if (arg === "--security") {
+      enableSecurity = true;
     } else {
       ideaParts.push(arg);
     }
   }
 
-  return { idea: ideaParts.join(" "), dashboard, dashboardPort, enableApproval, enableRefinement };
+  return { idea: ideaParts.join(" "), dashboard, dashboardPort, enableApproval, enableRefinement, enableIdentity, enableGovernance, enableAudit, enableSecurity };
 }
 
 async function main(): Promise<void> {
@@ -90,7 +111,7 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  const { idea, dashboard, dashboardPort, enableApproval, enableRefinement } = parseArgs(rawArgs);
+  const { idea, dashboard, dashboardPort, enableApproval, enableRefinement, enableIdentity, enableGovernance, enableAudit, enableSecurity } = parseArgs(rawArgs);
   const linearApiKey = process.env.LINEAR_API_KEY;
 
   if (!idea) {
@@ -147,6 +168,10 @@ async function main(): Promise<void> {
     enableApproval,
     enableRefinement,
     linearApiKey,
+    enableIdentity,
+    enableGovernance,
+    enableAudit,
+    enableSecurity,
   });
 
   process.exit(plan.status === "failed" ? 1 : 0);

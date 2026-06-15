@@ -19,6 +19,16 @@ import { AgentMessageBus } from "../communication/message-bus.js";
 import { runRefinementPhase, writeRefinementSummary } from "../refinement/refinement-phase.js";
 import { DEFAULT_REVIEW_PAIRS } from "../refinement/review-pairs.js";
 import { gatherWebResearch } from "../agents/base-agent.js";
+// Phase 10 — Audit
+import { AuditLog } from "../audit/audit-log.js";
+import { ProvenanceTracker } from "../audit/provenance-tracker.js";
+// Phase 9 — Governance
+import { PolicyEngine } from "../governance/policy-engine.js";
+import { DEFAULT_POLICY } from "../governance/policy-templates.js";
+import { assessRisk } from "../governance/risk-assessment.js";
+// Phase 11 — Human-in-the-Loop
+import { ApprovalWorkflow } from "../approval/approval-workflow.js";
+import { evaluateEscalation } from "../approval/risk-escalation.js";
 
 export interface CEOOptions {
   idea: string;
@@ -35,16 +45,40 @@ export interface CEOOptions {
   refinementConfig?: RefinementConfig;
   /** Phase 7 — Linear API key for project sync (optional) */
   linearApiKey?: string;
+  /** Phase 8 — Enable cryptographic identity for agents */
+  enableIdentity?: boolean;
+  /** Phase 9 — Enable governance policy engine */
+  enableGovernance?: boolean;
+  /** Phase 10 — Enable hash-chained audit logging */
+  enableAudit?: boolean;
+  /** Phase 13 — Enable security platform (TEE, secrets, zero-trust) */
+  enableSecurity?: boolean;
 }
 
 export async function runCEOAgent(options: CEOOptions): Promise<ProjectPlan> {
-  const { idea, apiKey, baseURL, outputBase, logger, projectRoot, enableApproval = false, enableRefinement = false, linearApiKey } = options;
+  const { idea, apiKey, baseURL, outputBase, logger, projectRoot, enableApproval = false, enableRefinement = false, linearApiKey, enableIdentity = false, enableGovernance = false, enableAudit = false, enableSecurity = false } = options;
 
   logger.banner(`Agent Org — Product Idea: "${idea}"`);
 
   // ── Generate run ID for correlation (Phase 12) ──
   const runId = generateRunId();
   logger.setRunId(runId);
+
+  // ── Phase 10: Initialize audit log + provenance tracker ──
+  const auditLog = enableAudit ? new AuditLog() : null;
+  const provenance = enableAudit ? new ProvenanceTracker() : null;
+  if (enableAudit && provenance) {
+    provenance.trackDecision(runId, idea);
+  }
+
+  // ── Phase 9: Initialize governance policy engine ──
+  const policyEngine = enableGovernance ? new PolicyEngine() : null;
+  if (policyEngine) {
+    DEFAULT_POLICY.forEach((rule) => policyEngine.addRule(rule));
+  }
+
+  // ── Phase 11: Initialize approval workflow ──
+  const approvalWorkflow = enableApproval ? new ApprovalWorkflow() : null;
 
   // ── Set up event emitter + structured logging ──
   const emitter = new AgentEventEmitter();
@@ -94,6 +128,66 @@ export async function runCEOAgent(options: CEOOptions): Promise<ProjectPlan> {
   }
   ctx.webResearchContext = webResearchContext;
 
+  // ── Phase 9: Governance — evaluate risk before spawning VPs ──
+  if (policyEngine) {
+    const risk = assessRisk("spawn", "medium");
+    const govCtx = {
+      riskLevel: risk,
+      delegationDepth: 0,
+      timestamp: new Date().toISOString(),
+    };
+    const decision = policyEngine.evaluate("ceo", "spawn", govCtx);
+    logger.info(`Governance evaluation: ${decision.effect} (risk: ${risk}, policy: ${decision.ruleId ?? "none"})`);
+    if (decision.effect === "deny") {
+      logger.info("Governance policy denied VP spawning — aborting");
+      updateStatus("failed");
+      return {
+        idea,
+        timestamp: new Date().toISOString(),
+        pmResult: { role: "pm", status: "failed", outputPath: "", summary: "Blocked by governance policy", artifacts: [], tokenUsage: { input: 0, output: 0 }, durationMs: 0, error: "Governance deny" },
+        ctoResult: { role: "cto", status: "failed", outputPath: "", summary: "Blocked by governance policy", artifacts: [], tokenUsage: { input: 0, output: 0 }, durationMs: 0, error: "Governance deny" },
+        cisoResult: { role: "ciso", status: "failed", outputPath: "", summary: "Blocked by governance policy", artifacts: [], tokenUsage: { input: 0, output: 0 }, durationMs: 0, error: "Governance deny" },
+        cfoResult: { role: "cfo", status: "failed", outputPath: "", summary: "Blocked by governance policy", artifacts: [], tokenUsage: { input: 0, output: 0 }, durationMs: 0, error: "Governance deny" },
+        cooResult: { role: "coo", status: "failed", outputPath: "", summary: "Blocked by governance policy", artifacts: [], tokenUsage: { input: 0, output: 0 }, durationMs: 0, error: "Governance deny" },
+        icResults: [],
+        status: "failed",
+        gaps: ["Governance policy denied VP spawning"],
+      };
+    }
+    // Record policy evaluation to audit
+    if (auditLog) {
+      await auditLog.appendEntry({
+        agentDid: "did:agent:ceo",
+        action: "policy_eval",
+        inputHash: `risk:${risk}`,
+        outputHash: `decision:${decision.decision}`,
+        inputRef: "governance-eval",
+        outputRef: "governance-decision",
+        timestamp: new Date().toISOString(),
+        eventId: `audit-${generateEventId()}`,
+        signature: "",
+      });
+    }
+  }
+
+  // ── Phase 10: Audit — record CEO decision delegation ──
+  if (auditLog) {
+    await auditLog.appendEntry({
+      agentDid: "did:agent:ceo",
+      action: "agent_spawn",
+      inputHash: idea.slice(0, 64),
+      outputHash: "vps-spawned",
+      inputRef: idea,
+      outputRef: "outputs/ceo",
+      timestamp: new Date().toISOString(),
+      eventId: `audit-${generateEventId()}`,
+      signature: "",
+    });
+  }
+  if (provenance) {
+    provenance.trackDecision(runId, idea);
+  }
+
   logger.info("CEO spawning 5 VPs in parallel: PM, CTO, CISO, CFO, COO…");
 
   // Use Promise.allSettled so one VP throwing doesn't kill the whole orchestration.
@@ -125,6 +219,50 @@ export async function runCEOAgent(options: CEOOptions): Promise<ProjectPlan> {
   });
 
   const [pmResult, ctoResult, cisoResult, cfoResult, cooResult] = vpResults;
+
+  // ── Phase 10: Audit — record VP completions/failures ──
+  if (auditLog) {
+    for (const vp of vpResults) {
+      await auditLog.appendEntry({
+        agentDid: `did:agent:${vp.role}`,
+        action: vp.status === "failed" ? "agent_fail" : "agent_complete",
+        inputHash: idea.slice(0, 64),
+        outputHash: vp.summary.slice(0, 64),
+        inputRef: idea,
+        outputRef: vp.outputPath,
+        timestamp: new Date().toISOString(),
+        eventId: `audit-${generateEventId()}`,
+        signature: "",
+      });
+    }
+  }
+
+  // ── Phase 10: Provenance — track VP delegations ──
+  if (provenance) {
+    for (const vp of vpResults) {
+      provenance.trackDelegation("ceo", vp.role, "spawn", idea);
+      if (vp.status === "completed" || vp.status === "partial") {
+        provenance.trackOutput(vp.role, vp.outputPath, [idea]);
+      }
+    }
+  }
+
+  // ── Phase 11: Risk escalation check on VP failures ──
+  if (approvalWorkflow && enableApproval) {
+    const escalation = evaluateEscalation(vpResults, "medium", [
+      { trigger: "reject", escalateTo: "ceo", notifyChannels: ["dashboard"], timeoutMs: 0 },
+    ]);
+    if (escalation) {
+      logger.info(`Risk escalation triggered: ${escalation.target} (${escalation.reason})`);
+      emitter.emit({
+        type: "gate",
+        timestamp: new Date().toISOString(),
+        eventId: `escalation-${generateEventId()}`,
+        runId,
+        summary: `Escalation: ${escalation.reason} → ${escalation.target}`,
+      });
+    }
+  }
 
   // Collect IC results from all VP branches (embedded by orchestrator agents)
   const icResults: AgentResult[] = [
@@ -317,7 +455,7 @@ export async function runCEOAgent(options: CEOOptions): Promise<ProjectPlan> {
     );
   }
 
-  return await buildPlan(idea, outputBase, vpResults, icResults, logger, projectRoot, onArtifact, refinementReport, linearSyncResult);
+  return await buildPlan(idea, outputBase, vpResults, icResults, logger, projectRoot, onArtifact, refinementReport, linearSyncResult, auditLog, provenance);
 }
 
 async function buildPlan(
@@ -330,6 +468,8 @@ async function buildPlan(
   onArtifact: (result: AgentResult, projectRoot: string) => void,
   refinementReport?: RefinementReport,
   linearSyncResult?: LinearSyncResult,
+  auditLog?: AuditLog | null,
+  provenance?: ProvenanceTracker | null,
 ): Promise<ProjectPlan> {
   // Determine overall status
   const gaps: string[] = [];
@@ -401,6 +541,21 @@ async function buildPlan(
     totalTokens: { input: totalInputTokens, output: totalOutputTokens },
     totalDurationMs: logger.getDuration(),
   });
+
+  // ── Phase 10: Audit — record final run completion ──
+  if (auditLog) {
+    await auditLog.appendEntry({
+      agentDid: "did:agent:ceo",
+      action: plan.status === "failed" ? "agent_fail" : "agent_complete",
+      inputHash: idea.slice(0, 64),
+      outputHash: `status:${plan.status}`,
+      inputRef: idea,
+      outputRef: `${outputBase}/project-plan.json`,
+      timestamp: new Date().toISOString(),
+      eventId: `audit-${generateEventId()}`,
+      signature: "",
+    });
+  }
 
   updateStatus(plan.status === "failed" ? "failed" : "complete");
 

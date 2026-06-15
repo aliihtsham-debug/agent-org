@@ -1,6 +1,14 @@
 import type { LinearSyncResult } from "../tools/linear-types.js";
 export type { LinearSyncResult };
 
+// ── Phase 8-16: Re-export enterprise types for convenience ──
+export type { AgentIdentity, AgentKeyPair, AgentRegistration, DelegationCredential, IdentityContext } from "./identity-types.js";
+export type { RiskLevel, PolicyRule, PolicyDecision, GovernanceContext, PolicyEngine, GovernanceTemplate, ApprovalMatrix } from "./governance-types.js";
+export type { AuditEntry, AuditActionType, DecisionProvenance, ComplianceReport, ComplianceFinding, AuditFilter, ChainVerificationResult } from "./audit-types.js";
+export type { ApprovalDecision, ApprovalStage, ApprovalRequest, ApprovalResponse, EscalationRule, EscalationAction, MultiStageApproval } from "./approval-types.js";
+export type { AgentMemory, MemoryEntry, AgentReputation, ReputationEvent, OrganizationalKnowledge, KnowledgeEntry, WorkflowCheckpoint } from "./memory-types.js";
+export type { OrganizationalBlueprint, BlueprintAgentRole, BlueprintMetadata, AgentPack, WorkflowTemplate } from "./marketplace-types.js";
+
 export type AgentRole =
   | "ceo"
   | "cto"
