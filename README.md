@@ -16,10 +16,12 @@ Agent Org is a **multi-agent orchestration system** powered by the [Claude Agent
 - [Installation](#installation)
 - [Configuration](#configuration)
 - [Usage](#usage)
+- [Enterprise Features](#enterprise-features)
 - [Web Dashboard](#web-dashboard)
 - [Output Structure](#output-structure)
 - [What Each Agent Produces](#what-each-agent-produces)
 - [Failure Handling](#failure-handling)
+- [Security](#security)
 - [Pros \& Advantages](#pros--advantages)
 - [Project Structure](#project-structure)
 - [Design Decisions](#design-decisions)
@@ -283,7 +285,18 @@ The product idea can be any length. Everything after `src/index.ts` is joined in
 |------|-------------|
 | `--dashboard [port]` | Start web dashboard for real-time monitoring (default port: 3001) |
 | `--approve` | Enable human approval gates at milestones |
-| `--refine` | Enable cross-functional iterative refinement (Phase 6) |
+| `--refine` | Enable cross-functional iterative refinement |
+| `--identity` | Enable cryptographic agent identity (Ed25519 keys, DID registration, delegation credentials) |
+| `--governance` | Enable governance policy engine (role-based authorization, risk assessment) |
+| `--audit` | Enable hash-chained audit logging with compliance reports |
+| `--security` | Enable security platform (TEE attestation, secrets vault, zero-trust communication) |
+| `--memory` | Enable persistent agent memory, reputation scoring, and workflow checkpoints |
+| `--marketplace` | Enable organizational blueprint and agent pack marketplace |
+| `--template <name>` | Select governance template: `default`, `strict`, `government`, or `banking` |
+| `--blueprint <id>` | Load an organizational blueprint from the marketplace |
+| `--onboard` | Run enterprise onboarding flow |
+| `--white-label <name>` | Configure white-label deployment with custom branding |
+| `--full-enterprise` | Enable all enterprise features at once |
 | `--help`, `-h` | Show help |
 
 > **Note:** Linear sync is controlled by the `LINEAR_API_KEY` environment variable, not a CLI flag. Set it in `.env` to enable.
@@ -292,14 +305,22 @@ The product idea can be any length. Everything after `src/index.ts` is joined in
 
 Agent output is capped at **512 KB per agent** to prevent disk exhaustion and memory corruption. If an agent's output exceeds the limit, it is truncated with a notice. This is a defense-in-depth measure against prompt injection attacks that cause repetitive or looping generation.
 
-### Security Configuration
+### Environment Variables
 
-| Environment Variable | Default | Purpose |
+| Variable | Default | Purpose |
 |---|---|---|
+| `OPENROUTER_API_KEY` | *(required)* | OpenRouter API key |
+| `OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1` | Custom OpenRouter endpoint |
+| `LINEAR_API_KEY` | *(none)* | Linear project management sync |
 | `DASHBOARD_TOKEN` | *(none)* | Enable token authentication for the web dashboard |
 | `LLM_MAX_CONCURRENT` | `8` | Maximum concurrent LLM API calls |
 | `LINEAR_MAX_CONCURRENT` | `3` | Maximum concurrent Linear API calls |
 | `DASHBOARD_MAX_EVENTS` | `1000` | Maximum events retained in dashboard buffer |
+| `IDENTITY_STORE_DIR` | `outputs/.identity` | Agent key pair storage |
+| `AGENT_ORG_AUDIT_DIR` | `outputs/.audit` | Audit chain storage |
+| `AGENT_ORG_MEMORY_DIR` | `outputs/.memory` | Agent memory and reputation storage |
+| `AGENT_ORG_WORKFLOW_DIR` | `outputs/.workflows` | Workflow checkpoint storage |
+| `AGENT_ORG_MARKETPLACE_DIR` | `outputs/.marketplace` | Blueprint storage |
 
 ### Examples
 
@@ -316,8 +337,23 @@ npx tsx src/index.ts "B2B inventory management system" --approve
 # With cross-functional refinement (agents review each other's work)
 npx tsx src/index.ts "E-commerce platform" --refine
 
+# Enterprise: identity + governance + audit + security
+npx tsx src/index.ts "Fintech app" --identity --governance --audit --security
+
+# Government compliance template with full enterprise features
+npx tsx src/index.ts "Gov project" --full-enterprise --template government
+
+# Banking compliance with identity and audit
+npx tsx src/index.ts "Banking app" --template banking --identity --audit --security
+
+# White-label deployment with onboarding
+npx tsx src/index.ts "SaaS platform" --onboard --white-label "Acme Corp" --full-enterprise
+
+# Load a marketplace blueprint
+npx tsx src/index.ts "Startup MVP" --marketplace --blueprint startup-cto --identity
+
 # All flags combined
-npx tsx src/index.ts "Recipe sharing platform" --dashboard --approve --refine
+npx tsx src/index.ts "Recipe sharing platform" --dashboard --approve --refine --identity --governance --audit --security --memory
 ```
 
 ### Help
@@ -329,6 +365,122 @@ npx tsx src/index.ts --help
 ### Interrupting Execution
 
 Press `Ctrl+C` at any time to stop. All artifacts already written to `outputs/` will be preserved.
+
+---
+
+## Enterprise Features
+
+Agent Org includes a comprehensive set of enterprise-grade features for production deployments, regulated industries, and organizations that need verifiable agent identity, governance, and auditability.
+
+### Agent Identity (`--identity`)
+
+Every agent gets a cryptographic identity using Ed25519 key pairs:
+
+- **Key generation**: Each agent (CEO, VPs, ICs) receives a unique Ed25519 key pair
+- **DID registration**: Agents are registered with Decentralized Identifiers (DIDs) in the `did:agent:<uuid>` format
+- **Delegation credentials**: The CEO signs delegation credentials for each VP, creating a verifiable chain of authority (CEO → VP → Manager → IC)
+- **Key rotation and revocation**: Keys can be rotated and agents can be revoked with full audit trail
+- **Signed outputs**: Agent results are cryptographically signed, proving which agent produced which output
+- **Terminal 3 SDK integration**: Adapter pattern ready for Terminal 3 Agent Auth SDK integration
+
+```
+CEO (Ed25519 key pair)
+  ├── signs delegation credential → PM (Ed25519 key pair)
+  ├── signs delegation credential → CTO (Ed25519 key pair)
+  │     ├── signs delegation credential → Engineering Manager
+  │     └── signs delegation credential → QA Manager
+  ├── signs delegation credential → CISO (Ed25519 key pair)
+  ├── signs delegation credential → CFO (Ed25519 key pair)
+  └── signs delegation credential → COO (Ed25519 key pair)
+```
+
+### Governance Policy Engine (`--governance`)
+
+A full policy engine for agent permissions and role-based authorization:
+
+- **Policy rules**: Define what actions each agent role can perform (read, write, deploy, etc.)
+- **Risk-based authorization**: Actions are classified by risk level (minimal → critical) with different approval requirements
+- **Delegation authority validation**: Enforces maximum delegation depth (CEO: 3, VPs: 2, Managers: 1, ICs: 0)
+- **Time-based restrictions**: Policies can restrict actions to business hours
+- **Approval matrices**: Define who must approve actions at each risk level
+
+### Governance Templates (`--template`)
+
+Pre-built governance templates for different compliance requirements:
+
+| Template | Use Case | Key Features |
+|----------|----------|-------------|
+| `default` | Standard enterprise | Allow most actions, require approval for external writes |
+| `strict` | High-security environments | All external actions require approval, time-based write restrictions |
+| `government` | FedRAMP / NIST 800-53 | Dual approval for all writes, full audit trail, no autonomous external writes |
+| `banking` | PCI-DSS / SOX | Dual approval for financial actions, CFO + CISO approval matrix |
+
+### Enterprise Audit System (`--audit`)
+
+Immutable, hash-chained audit logging for compliance and forensics:
+
+- **Hash-chained entries**: Each audit entry includes a SHA-256 hash of the previous entry, making tampering detectable
+- **Decision provenance**: Full chain from idea → delegation → agent output, recording every step
+- **Signed entries**: Audit entries are signed with the agent's identity key
+- **Chain verification**: Verify the integrity of the entire audit chain at any time
+- **Compliance reports**: Auto-generate compliance reports for SOC2, ISO27001, GDPR, and HIPAA
+- **Export**: Audit logs and compliance reports exported to JSON
+
+### Human-in-the-Loop Control (`--approve`)
+
+Multi-stage approval workflows and human override capabilities:
+
+- **Milestone gates**: Execution pauses at milestones for human approval before proceeding
+- **Multi-stage approvals**: Define multiple approval stages with different approvers
+- **Risk escalation**: Automatic escalation when critical-path agents fail or risk thresholds are exceeded
+- **Human override**: AbortController-based interruption — humans can stop any agent at any time
+- **Approval center**: Dashboard UI for reviewing and approving/rejecting agent outputs
+
+### Security Platform (`--security`)
+
+Defense-in-depth security for agent execution:
+
+- **TEE attestation**: Trusted Execution Environment attestation at startup (local simulation, with Intel SGX adapter)
+- **Secrets vault**: File-based secrets management with HashiCorp Vault adapter pattern
+- **Zero-trust communication**: Every agent-to-agent interaction is authenticated and authorized
+- **Secure runner**: Agent execution wrapper that verifies identity, checks policies, and signs outputs
+- **Path enforcement**: All file operations are validated against the allowed output directory
+
+### Persistent Agent Memory (`--memory`)
+
+Agents that learn and improve across runs:
+
+- **Persistent memory**: Agents store and retrieve memories from previous runs (up to 100 entries per agent)
+- **Reputation scoring**: Agents earn/lose reputation based on completion rate, critique acceptance, and collaboration
+- **Cross-project knowledge**: Organizational knowledge base that accumulates patterns, lessons, and decisions
+- **Workflow checkpoints**: Save and resume long-running workflows
+
+### Design Partner Edition (Templates, Onboarding & White-Label)
+
+Enterprise deployment and customization:
+
+- **Government workflow templates**: Pre-built FedRAMP/NIST-compliant governance configurations
+- **Banking compliance templates**: PCI-DSS/SOX-aligned policy rules and approval matrices
+- **Enterprise onboarding**: Guided setup flow for new organizations (compliance requirements, governance, branding)
+- **White-label deployment**: Custom organization name, colors, logo, dashboard title, and feature toggles
+
+### AI Organization Marketplace (`--marketplace`)
+
+Reusable organizational blueprints and agent packs:
+
+- **Blueprint registry**: Publish, search, and install organizational blueprints
+- **Agent packs**: Pre-built team configurations (Startup CTO Pack, Security-First Pack, Compliance-Heavy Pack, Full-Stack Small Team)
+- **Workflow templates**: Reusable workflow definitions (Feature Launch Pipeline, Security Audit Workflow, Compliance Review Cycle)
+
+### Quick Start: Full Enterprise
+
+To enable everything at once:
+
+```bash
+npx tsx src/index.ts "Your product idea" --full-enterprise --template banking
+```
+
+This activates: identity, governance, audit, security, memory, marketplace, and human-in-the-loop controls — all in a single command.
 
 ---
 
@@ -354,6 +506,7 @@ Then open **http://localhost:3001** in your browser.
 - **Event log** — real-time stream of agent events with type filtering (spawn, complete, fail, gate)
 - **Stats bar** — agents completed, failed, total events, elapsed time
 - **Approval gate banner** — appears when the orchestrator pauses at a milestone
+- **Health endpoint** — `/api/health` returns uptime, event count, and run metrics
 
 ### Mock Mode
 
@@ -379,6 +532,7 @@ outputs/
 ├── project-plan.json                  # Machine-readable plan (JSON)
 ├── agent-events.jsonl                 # Structured event log (JSONL)
 ├── artifact-manifest.json             # Artifact metadata index
+├── compliance-report.json             # Compliance report (with --audit)
 ├── specs/
 │   ├── pm/pm/output.md                # Product strategy
 │   ├── ux-research/ux-research/output.md
@@ -423,15 +577,17 @@ The unified plan includes:
 - Per-VP summary table with status and artifacts
 - Engineering delivery table (all IC agents, their status, and summaries)
 - Token usage breakdown per agent
+- Enterprise features status (identity, governance, audit, security, memory)
+- Compliance report with findings (when audit is enabled)
 - Identified gaps requiring human review
 
 ### project-plan.json
 
-The machine-readable version contains the full `ProjectPlan` object with all agent results, token usage, timing, and error details. Useful for programmatic consumption or integration with other tools.
+The machine-readable version contains the full `ProjectPlan` object with all agent results, token usage, timing, error details, enterprise metadata, and compliance findings. Useful for programmatic consumption or integration with other tools.
 
 ### agent-events.jsonl
 
-One JSON object per line, capturing every agent lifecycle event (`spawn`, `complete`, `fail`, `retry`, `info`, `gate`). Machine-readable structured log.
+One JSON object per line, capturing every agent lifecycle event (`spawn`, `complete`, `fail`, `retry`, `info`, `gate`, `run_summary`). Machine-readable structured log.
 
 ### artifact-manifest.json
 
@@ -447,6 +603,7 @@ Index of all generated artifacts with metadata: `{ role, path, timestamp, sizeBy
 - Identifies gaps and flags items needing human review
 - Commits each agent's artifacts to role-specific git branches
 - Writes `project-plan.md` and `project-plan.json`
+- With enterprise features: creates agent identities, evaluates governance policies, generates compliance reports
 
 ### PM Agent (Product Manager)
 - **Problem statement** — What problem does this product solve?
@@ -575,7 +732,7 @@ Index of all generated artifacts with metadata: `{ role, path, timestamp, sizeBy
 - Dashboard definitions, SLA/SLO targets
 - Error tracking setup, key product metrics
 
-### Linear Mapper Agent 
+### Linear Mapper Agent
 - Reads all agent output files from the registry/disk
 - Extracts user stories, epics, sprints, security findings, and deliverables
 - Produces structured `linear-import.json` with: project name, labels, cycles, issues, and metadata
@@ -583,7 +740,7 @@ Index of all generated artifacts with metadata: `{ role, path, timestamp, sizeBy
 - Maps security severities to Linear priority
 - Does NOT call the Linear API — only produces structured data for the sync module
 
-### Linear Sync 
+### Linear Sync
 - Creates Linear project from the mapper's structured data
 - Creates labels for each agent role / VP branch
 - Creates cycles from the scheduler's sprint plan (up to 3)
@@ -592,6 +749,8 @@ Index of all generated artifacts with metadata: `{ role, path, timestamp, sizeBy
 - Non-fatal: all errors are caught and logged; the run completes normally
 
 ---
+
+## Failure Handling
 
 Agent Org is designed to be resilient to individual agent failures:
 
@@ -604,6 +763,9 @@ Agent Org is designed to be resilient to individual agent failures:
 | **Ctrl+C interrupt** | Graceful shutdown; all artifacts already written are preserved |
 | **Git operations fail** | Non-fatal; artifacts remain on disk regardless |
 | **Linear API errors** | Non-fatal; run completes with warnings in `linearSync.errors` |
+| **Governance policy denies action** | CEO aborts with a clear explanation of which policy rule was violated |
+| **TEE attestation fails** | Warning logged; execution continues in degraded security mode |
+| **Identity creation fails** | Non-fatal; run continues without cryptographic identity |
 
 ### Status Values
 
@@ -643,6 +805,12 @@ Agent Org includes multiple security measures designed to protect against common
 ### Dashboard Security
 - **Token authentication**: When `DASHBOARD_TOKEN` is set, all dashboard requests must include the token via query parameter or `Authorization: Bearer` header.
 - **Localhost binding**: The dashboard binds to `127.0.0.1` by default, not `0.0.0.0`.
+
+### Cryptographic Identity
+- **Ed25519 key pairs**: Each agent receives a unique cryptographic identity
+- **Signed delegation**: Parent agents sign delegation credentials for their children, creating a verifiable chain of authority
+- **Signed outputs**: Agent results are signed, proving provenance
+- **DID-based identification**: Agents are identified by Decentralized Identifiers (DIDs)
 
 ### Non-Fatal Design
 - **API key isolation**: `LINEAR_API_KEY` and `OPENROUTER_API_KEY` are separate. Compromising one does not expose the other.
@@ -685,6 +853,18 @@ Optional `LINEAR_API_KEY` syncs the entire project plan to Linear — project, l
 ### 11. Type-Safe TypeScript
 Full TypeScript with strict mode. Types for all agent roles, task specs, results, and project plans.
 
+### 12. Enterprise-Grade Security
+Cryptographic agent identity, governance policies, audit trails, TEE attestation, and zero-trust communication — ready for regulated industries.
+
+### 13. Compliance-Ready
+Pre-built templates for government (FedRAMP/NIST), banking (PCI-DSS/SOX), and standard enterprise compliance. Auto-generated compliance reports for SOC2, ISO27001, GDPR, and HIPAA.
+
+### 14. Persistent Agent Memory
+Agents that learn from past runs, build reputation, and accumulate organizational knowledge over time.
+
+### 15. White-Label Deployment
+Customize branding, governance templates, and feature toggles for different organizations and industries.
+
 ---
 
 ## Project Structure
@@ -713,22 +893,75 @@ agent-org/
 │   │   ├── ciso-agent.ts         # CISO orchestrator
 │   │   ├── cfo-agent.ts          # CFO orchestrator
 │   │   ├── coo-agent.ts          # COO orchestrator
-│   │   ├── linear-mapper-agent.ts # Linear mapper agent 
+│   │   ├── linear-mapper-agent.ts # Linear mapper agent
 │   │   └── ic-agents.ts          # 17 IC agents (factory + spawn functions)
 │   │
+│   ├── identity/                   # Cryptographic agent identity
+│   │   ├── agent-identity.ts     # Ed25519 key generation, signing, verification
+│   │   ├── delegation.ts         # Delegation credentials (CEO→VP→Manager→IC)
+│   │   ├── identity-adapter.ts   # Identity provider interface + Terminal 3 adapter
+│   │   └── identity-store.ts     # File-based key pair persistence
+│   │
+│   ├── governance/                 # Policy engine + authorization
+│   │   ├── policy-engine.ts      # Policy evaluation engine
+│   │   ├── policy-templates.ts   # Pre-built governance templates
+│   │   ├── delegation-authority.ts # Delegation chain validation
+│   │   └── risk-assessment.ts    # Action risk classification
+│   │
+│   ├── audit/                      # Immutable audit logging
+│   │   ├── audit-log.ts          # Hash-chained append-only audit log
+│   │   ├── audit-signer.ts       # Sign audit entries with identity keys
+│   │   ├── provenance-tracker.ts # Decision provenance tracking
+│   │   └── compliance-export.ts  # SOC2/ISO27001/GDPR/HIPAA reports
+│   │
+│   ├── approval/                   # Human-in-the-loop control
+│   │   ├── approval-workflow.ts  # Multi-stage approval workflows
+│   │   ├── risk-escalation.ts    # Risk-based escalation engine
+│   │   └── human-override.ts     # Human override (AbortController)
+│   │
+│   ├── security/                   # Security platform
+│   │   ├── tee-adapter.ts        # TEE attestation (local + Intel SGX)
+│   │   ├── secrets-adapter.ts    # Secrets vault (local + HashiCorp Vault)
+│   │   ├── zero-trust.ts         # Zero-trust agent communication
+│   │   └── runtime-enforcement.ts # Secure agent runner wrapper
+│   │
+│   ├── memory/                     # Persistent agent memory
+│   │   ├── agent-memory.ts       # Per-agent memory storage/retrieval
+│   │   ├── reputation-tracker.ts # Agent reputation scoring
+│   │   ├── org-knowledge.ts      # Cross-project organizational knowledge
+│   │   └── workflow-state.ts     # Workflow checkpoint/resume
+│   │
+│   ├── templates/                  # Industry-specific templates
+│   │   ├── banking-compliance.ts # PCI-DSS/SOX governance template
+│   │   ├── government-workflow.ts # FedRAMP/NIST governance template
+│   │   ├── enterprise-onboarding.ts # Enterprise onboarding flow
+│   │   └── white-label.ts        # White-label deployment configuration
+│   │
+│   ├── marketplace/                # AI Organization Marketplace
+│   │   ├── blueprint-registry.ts # Blueprint publish/search/install
+│   │   ├── agent-pack.ts         # Pre-built agent packs
+│   │   └── workflows.ts          # Reusable workflow templates
+│   │
 │   ├── prompts/
-│   │   └── agent-prompts.ts      # All 26 system prompts (centralized)
+│   │   ├── agent-prompts.ts      # All 26 system prompts (centralized)
+│   │   └── refinement-prompts.ts # Review and refinement prompt templates
 │   │
 │   ├── tools/
 │   │   ├── file-tools.ts         # File I/O utilities
 │   │   ├── git-tools.ts          # Low-level git operations
 │   │   ├── git-commit.ts         # Branch/commit/PR workflow
 │   │   ├── web-tools.ts          # Web search/fetch
-│   │   ├── linear-sync.ts        # Linear API sync 
-│   │   └── linear-types.ts       # Linear type definitions 
+│   │   ├── linear-sync.ts        # Linear API sync
+│   │   └── linear-types.ts       # Linear type definitions
 │   │
 │   ├── types/
-│   │   └── agent-types.ts        # Shared types + ROLE_OUTPUT_DIR
+│   │   ├── agent-types.ts        # Shared types + ROLE_OUTPUT_DIR
+│   │   ├── identity-types.ts     # Agent identity types
+│   │   ├── governance-types.ts   # Policy + governance types
+│   │   ├── audit-types.ts        # Audit + compliance types
+│   │   ├── approval-types.ts     # Approval + escalation types
+│   │   ├── memory-types.ts       # Memory + reputation types
+│   │   └── marketplace-types.ts  # Blueprint + agent pack types
 │   │
 │   ├── utils/
 │   │   └── semaphore.ts          # Concurrency limiter for LLM/Linear API calls
@@ -745,17 +978,26 @@ agent-org/
 │       └── mock-run.ts           # Standalone mock data runner
 │
 ├── tests/
-│   ├── e2e.test.ts               # End-to-end integration tests (28 tests)
-│   ├── registry.test.ts          # Registry poisoning prevention (24 tests)
-│   ├── refinement.test.ts        # Refinement phase tests (17 tests)
-│   ├── base-agent.test.ts        # Base agent utilities (17 tests)
-│   ├── message-bus.test.ts       # Message bus error isolation (10 tests)
-│   ├── event-emitter.test.ts     # Event emitter error isolation (10 tests)
-│   ├── readartifact-safety.test.ts # Path traversal prevention (7 tests)
-│   ├── linear-mapper-edge.test.ts # Linear mapper edge cases (7 tests)
-│   ├── ceo-partial-failure.test.ts # CEO resilience (7 tests)
-│   └── linear-sync.test.ts       # Linear sync unit tests (6 tests)
-│                               # Total: 135 tests across 10 files
+│   ├── e2e.test.ts               # End-to-end integration tests
+│   ├── registry.test.ts          # Registry poisoning prevention
+│   ├── refinement.test.ts        # Refinement phase tests
+│   ├── base-agent.test.ts        # Base agent utilities
+│   ├── message-bus.test.ts       # Message bus error isolation
+│   ├── event-emitter.test.ts     # Event emitter error isolation
+│   ├── readartifact-safety.test.ts # Path traversal prevention
+│   ├── linear-mapper-edge.test.ts # Linear mapper edge cases
+│   ├── ceo-partial-failure.test.ts # CEO resilience
+│   ├── linear-sync.test.ts       # Linear sync unit tests
+│   ├── identity.test.ts          # Agent identity tests
+│   ├── governance.test.ts        # Governance policy engine tests
+│   ├── audit.test.ts             # Audit system tests
+│   ├── approval.test.ts          # Approval workflow tests
+│   ├── security.test.ts          # Security platform tests
+│   ├── memory.test.ts            # Agent memory tests
+│   ├── templates.test.ts         # Template tests
+│   ├── marketplace.test.ts       # Marketplace tests
+│   └── dashboard-api.test.ts     # Dashboard API tests
+│                               # Total: 240 tests across 19 files
 │
 ├── outputs/                       # Agent-generated artifacts (gitignored)
 ├── dist/                          # Compiled JavaScript (build output)
@@ -789,6 +1031,12 @@ On failure, the retry includes the previous error message as context.
 
 ### 8. Git Integration
 Each agent's artifacts are committed to a role-specific branch, pushed to origin, and a PR is opened via `gh` CLI. All git operations are non-fatal.
+
+### 9. Adapter Pattern for External Systems
+Terminal 3 SDK, HashiCorp Vault, Intel SGX, and Linear all use adapter patterns — swap implementations without changing orchestration logic.
+
+### 10. Opt-In Enterprise Features
+All enterprise features (identity, governance, audit, security, memory, marketplace) are opt-in via CLI flags. The base system works without any of them.
 
 ---
 
@@ -827,17 +1075,33 @@ This is informational, not an error. It means either `LINEAR_API_KEY` is not set
 ### "Mapper agent produced no output file"
 The Linear Mapper agent couldn't produce valid JSON. This can happen if agent outputs are too short or malformed. Check `outputs/linear/mapper/output.md` for the raw mapper output.
 
+### "Governance policy denied VP spawning"
+A governance policy rule denied the action. Check the policy template you selected — some templates (like `government`) have strict rules. Try `--template default` for the most permissive policy.
+
+### "TEE attestation invalid"
+The Trusted Execution Environment reported an invalid attestation. This is expected in local/development mode. The run continues in degraded security mode. For production, configure a real TEE provider.
+
 ---
 
 ## Roadmap
 
-- [x] **Phase 1**: Foundation — CEO, PM, CTO, 5 IC agents
-- [x] **Phase 2**: Cross-functional — CISO, CFO, COO + sub-agents (26 agents total)
-- [x] **Phase 3**: Git integration — branch per agent, push + PR workflow
-- [x] **Phase 4**: Polish & observability — dashboard, structured logging, approval gates, E2E tests
-- [x] **Phase 5**: Agent-to-agent direct communication — in-memory registry, no disk round-trip
-- [x] **Phase 6**: Iterative refinement — cross-functional review pairs, `--refine` flag
-- [x] **Phase 7**: Linear integration — sync project plan to Linear workspace via `LINEAR_API_KEY`
+- [x] Foundation — CEO, PM, CTO, 5 IC agents
+- [x] Cross-functional — CISO, CFO, COO + sub-agents (26 agents total)
+- [x] Git integration — branch per agent, push + PR workflow
+- [x] Polish & observability — dashboard, structured logging, approval gates, E2E tests
+- [x] Agent-to-agent direct communication — in-memory registry, no disk round-trip
+- [x] Iterative refinement — cross-functional review pairs, `--refine` flag
+- [x] Linear integration — sync project plan to Linear workspace via `LINEAR_API_KEY`
+- [x] Cryptographic agent identity — Ed25519 keys, DID registration, delegation credentials
+- [x] Governance policy engine — role-based authorization, risk assessment, approval matrices
+- [x] Enterprise audit system — hash-chained logs, compliance reports, decision provenance
+- [x] Human-in-the-loop control — multi-stage approvals, risk escalation, human override
+- [x] Security platform — TEE attestation, secrets vault, zero-trust communication
+- [x] Persistent agent memory — reputation scoring, cross-project knowledge, checkpoints
+- [x] Industry templates — government, banking, strict, default governance configurations
+- [x] Enterprise onboarding — guided setup flow, compliance configuration
+- [x] White-label deployment — custom branding, feature toggles
+- [x] AI Organization Marketplace — blueprints, agent packs, workflow templates
 
 ---
 
