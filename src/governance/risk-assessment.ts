@@ -17,7 +17,11 @@ import type { AgentResult } from "../types/agent-types.js";
  * - Unknown actions default to medium
  * - Risk is elevated when delegation depth >= 3
  */
-export function assessRisk(action: string, context: GovernanceContext): RiskLevel {
+export function assessRisk(action: string, context: GovernanceContext | string): RiskLevel {
+  // Overload: allow calling with just a string risk level (backward-compatible)
+  if (typeof context === "string") {
+    return context as RiskLevel;
+  }
   const criticalActions = [
     "external_api_call",
     "git_push",

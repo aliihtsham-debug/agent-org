@@ -125,7 +125,7 @@ export class PolicyEngine {
       allowed: winner.effect === "allow" || requiresApproval,
       effect: winner.effect,
       reason: `Matched policy: ${winner.name}`,
-      ruleId: winner.id,
+      ruleId: winner.id ?? "unknown",
       requiresApproval,
     };
   }

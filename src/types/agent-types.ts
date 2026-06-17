@@ -3,7 +3,7 @@ export type { LinearSyncResult };
 
 // ── Phase 8-16: Re-export enterprise types for convenience ──
 export type { AgentIdentity, AgentKeyPair, AgentRegistration, DelegationCredential, IdentityContext } from "./identity-types.js";
-export type { RiskLevel, PolicyRule, PolicyDecision, GovernanceContext, PolicyEngine, GovernanceTemplate, ApprovalMatrix } from "./governance-types.js";
+export type { RiskLevel, PolicyRule, PolicyDecision, GovernanceContext, GovernanceTemplate, ApprovalMatrix } from "./governance-types.js";
 export type { AuditEntry, AuditActionType, DecisionProvenance, ComplianceReport, ComplianceFinding, AuditFilter, ChainVerificationResult } from "./audit-types.js";
 export type { ApprovalDecision, ApprovalStage, ApprovalRequest, ApprovalResponse, EscalationRule, EscalationAction, MultiStageApproval } from "./approval-types.js";
 export type { AgentMemory, MemoryEntry, AgentReputation, ReputationEvent, OrganizationalKnowledge, KnowledgeEntry, WorkflowCheckpoint } from "./memory-types.js";
@@ -69,6 +69,24 @@ export interface AgentResult {
   error?: string;
   /** IC results aggregated from sub-agents (used by orchestrator agents) */
   icResults?: AgentResult[];
+  /** Phase 8 — Cryptographic signature of the agent's output (Ed25519) */
+  signature?: string;
+  /** Phase 8 — DID of the agent that produced this result (e.g., "did:agent:<uuid>") */
+  producedBy?: string;
+  /** Phase 12 — Agent reputation score after this run (0-100) */
+  reputationScore?: number;
+}
+
+/** Phase 8-16 — Enterprise metadata summarizing which phases were active. */
+export interface EnterpriseMeta {
+  identityEnabled: boolean;
+  governanceEnabled: boolean;
+  auditEnabled: boolean;
+  securityEnabled: boolean;
+  memoryEnabled: boolean;
+  templateName: string;
+  totalAgents: number;
+  signedActions: number;
 }
 
 export interface ProjectPlan {
@@ -86,6 +104,10 @@ export interface ProjectPlan {
   refinementReport?: RefinementReport;
   /** Phase 7 — Linear sync result (only present when LINEAR_API_KEY was set) */
   linearSync?: LinearSyncResult;
+  /** Phase 10 — Compliance report (only present when audit was enabled) */
+  complianceReport?: import("./audit-types.js").ComplianceReport;
+  /** Phase 8-16 — Enterprise feature metadata */
+  enterpriseMeta?: EnterpriseMeta;
 }
 
 /** Summary of the refinement phase for inclusion in the project plan. */

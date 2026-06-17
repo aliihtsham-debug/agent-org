@@ -24,12 +24,19 @@ Usage:
 
 Options:
   --dashboard [port]  Start web dashboard (default port: 3001)
-  --approve           Enable human approval gates at milestones
+  --approve           Enable human approval gates at milestones (Phase 11)
   --refine            Enable cross-functional iterative refinement (Phase 6)
   --identity          Enable cryptographic agent identity (Phase 8)
   --governance        Enable governance policy engine (Phase 9)
   --audit             Enable hash-chained audit logging (Phase 10)
   --security          Enable security platform — TEE, secrets, zero-trust (Phase 13)
+  --memory            Enable persistent agent memory + reputation (Phase 12)
+  --marketplace       Enable AI Organization Marketplace (Phase 16)
+  --template <name>   Select governance template: default | strict | government | banking (Phase 15)
+  --blueprint <id>    Load an organizational blueprint from the marketplace (Phase 16)
+  --onboard           Run enterprise onboarding flow (Phase 15)
+  --white-label <name>  Configure white-label deployment (Phase 15)
+  --full-enterprise   Enable all enterprise phases (8-16) at once
   --help, -h          Show this help
 
 Examples:
@@ -37,6 +44,8 @@ Examples:
   npx tsx src/index.ts "URL shortener" --dashboard 3001
   npx tsx src/index.ts "Recipe platform" --dashboard --approve
   npx tsx src/index.ts "Fintech app" --governance --audit --identity --security
+  npx tsx src/index.ts "Gov project" --full-enterprise --template government
+  npx tsx src/index.ts "Banking app" --template banking --identity --audit --security
 
 Environment:
   OPENROUTER_API_KEY  Required. Your OpenRouter API key.
@@ -59,6 +68,12 @@ function parseArgs(argv: string[]): {
   enableGovernance: boolean;
   enableAudit: boolean;
   enableSecurity: boolean;
+  enableMemory: boolean;
+  enableMarketplace: boolean;
+  templateName: string;
+  blueprintId: string;
+  runOnboard: boolean;
+  whiteLabelName: string;
 } {
   let dashboard = false;
   let dashboardPort = 3001;
@@ -68,6 +83,12 @@ function parseArgs(argv: string[]): {
   let enableGovernance = false;
   let enableAudit = false;
   let enableSecurity = false;
+  let enableMemory = false;
+  let enableMarketplace = false;
+  let templateName = "default";
+  let blueprintId = "";
+  let runOnboard = false;
+  let whiteLabelName = "";
   const ideaParts: string[] = [];
 
   for (let i = 0; i < argv.length; i++) {
@@ -77,11 +98,10 @@ function parseArgs(argv: string[]): {
       process.exit(0);
     } else if (arg === "--dashboard") {
       dashboard = true;
-      // Check if next arg is a port number
       const next = argv[i + 1];
       if (next && /^\d+$/.test(next)) {
         dashboardPort = parseInt(next, 10);
-        i++; // skip port value
+        i++;
       }
     } else if (arg === "--approve") {
       enableApproval = true;
@@ -95,12 +115,44 @@ function parseArgs(argv: string[]): {
       enableAudit = true;
     } else if (arg === "--security") {
       enableSecurity = true;
+    } else if (arg === "--memory") {
+      enableMemory = true;
+    } else if (arg === "--marketplace") {
+      enableMarketplace = true;
+    } else if (arg === "--full-enterprise") {
+      enableIdentity = true;
+      enableGovernance = true;
+      enableAudit = true;
+      enableSecurity = true;
+      enableMemory = true;
+      enableApproval = true;
+      enableMarketplace = true;
+    } else if (arg === "--template") {
+      const next = argv[i + 1];
+      if (next && !next.startsWith("--")) {
+        templateName = next;
+        i++;
+      }
+    } else if (arg === "--blueprint") {
+      const next = argv[i + 1];
+      if (next && !next.startsWith("--")) {
+        blueprintId = next;
+        i++;
+      }
+    } else if (arg === "--onboard") {
+      runOnboard = true;
+    } else if (arg === "--white-label") {
+      const next = argv[i + 1];
+      if (next && !next.startsWith("--")) {
+        whiteLabelName = next;
+        i++;
+      }
     } else {
       ideaParts.push(arg);
     }
   }
 
-  return { idea: ideaParts.join(" "), dashboard, dashboardPort, enableApproval, enableRefinement, enableIdentity, enableGovernance, enableAudit, enableSecurity };
+  return { idea: ideaParts.join(" "), dashboard, dashboardPort, enableApproval, enableRefinement, enableIdentity, enableGovernance, enableAudit, enableSecurity, enableMemory, enableMarketplace, templateName, blueprintId, runOnboard, whiteLabelName };
 }
 
 async function main(): Promise<void> {
@@ -111,7 +163,7 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  const { idea, dashboard, dashboardPort, enableApproval, enableRefinement, enableIdentity, enableGovernance, enableAudit, enableSecurity } = parseArgs(rawArgs);
+  const { idea, dashboard, dashboardPort, enableApproval, enableRefinement, enableIdentity, enableGovernance, enableAudit, enableSecurity, enableMemory, enableMarketplace, templateName, blueprintId, runOnboard, whiteLabelName } = parseArgs(rawArgs);
   const linearApiKey = process.env.LINEAR_API_KEY;
 
   if (!idea) {
@@ -172,6 +224,12 @@ async function main(): Promise<void> {
     enableGovernance,
     enableAudit,
     enableSecurity,
+    enableMemory,
+    enableMarketplace,
+    templateName,
+    blueprintId,
+    runOnboard,
+    whiteLabelName,
   });
 
   process.exit(plan.status === "failed" ? 1 : 0);

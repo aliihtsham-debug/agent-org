@@ -14,16 +14,16 @@ export type PolicyEffect = "allow" | "deny" | "require_approval";
  * A single policy rule that governs whether an agent can perform an action.
  */
 export interface PolicyRule {
-  id: string;
+  id?: string;
   name: string;
-  description: string;
+  description?: string;
   effect: PolicyEffect;
-  subjects: AgentRole[];
+  subjects: (AgentRole | "*")[];
   actions: string[];
   resources?: string[];
   conditions?: PolicyCondition[];
   priority: number;
-  createdAt: string;
+  createdAt?: string;
 }
 
 /**
