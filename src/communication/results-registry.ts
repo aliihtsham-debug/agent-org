@@ -1,34 +1,8 @@
 import type { AgentRole, AgentResult } from "../types/agent-types.js";
+import { ROLE_OUTPUT_DIR } from "../types/agent-types.js";
 
-/** All valid agent roles — used to validate registry entries. */
-const VALID_ROLES: ReadonlySet<string> = new Set<AgentRole>([
-  "ceo",
-  "cto",
-  "pm",
-  "frontend-engineer",
-  "backend-engineer",
-  "testing-agent",
-  "security-auditor",
-  "devops-agent",
-  "engineering-manager",
-  "qa-manager",
-  "ai-engineer",
-  "performance-agent",
-  "ciso",
-  "vuln-scanner",
-  "compliance-agent",
-  "cfo",
-  "budget-agent",
-  "pricing-agent",
-  "coo",
-  "scheduler-agent",
-  "workflow-agent",
-  "monitoring-agent",
-  "ux-researcher",
-  "roadmap-agent",
-  "analytics-agent",
-  "linear-mapper",
-]);
+/** All valid agent roles — derived from ROLE_OUTPUT_DIR keys to avoid manual maintenance. */
+const VALID_ROLES: ReadonlySet<string> = new Set<AgentRole>(Object.keys(ROLE_OUTPUT_DIR) as AgentRole[]);
 
 /**
  * Shared in-memory results registry for direct agent-to-agent result access.

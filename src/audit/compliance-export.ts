@@ -119,6 +119,7 @@ export function findGaps(
       }
       break;
     case "GDPR":
+      // TODO: Implement actual GDPR data processing record checks
       findings.push({
         severity: "info",
         description: "GDPR compliance requires data processing records — ensure agent outputs containing personal data are identified",
@@ -127,6 +128,7 @@ export function findGaps(
       });
       break;
     case "HIPAA":
+      // TODO: Implement actual HIPAA PHI access control checks
       findings.push({
         severity: "info",
         description: "HIPAA compliance requires PHI access controls — ensure agents handling health data are properly authorized",

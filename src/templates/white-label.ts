@@ -22,14 +22,38 @@ export interface WhiteLabelConfig {
   customAgentRoles?: string[];
 }
 
+const TEMPLATE_DEFAULTS: Record<WhiteLabelConfig["template"], Partial<WhiteLabelConfig>> = {
+  default: {
+    primaryColor: "#3b82f6",
+    secondaryColor: "#8b5cf6",
+  },
+  strict: {
+    primaryColor: "#1e3a5f",
+    secondaryColor: "#3b82f6",
+  },
+  government: {
+    primaryColor: "#1a365d",
+    secondaryColor: "#2b6cb0",
+  },
+  banking: {
+    primaryColor: "#0d4f3c",
+    secondaryColor: "#16a34a",
+  },
+  startup: {
+    primaryColor: "#7c3aed",
+    secondaryColor: "#ec4899",
+  },
+};
+
 export function createWhiteLabelConfig(
   orgName: string,
   template: WhiteLabelConfig["template"] = "default",
 ): WhiteLabelConfig {
+  const defaults = TEMPLATE_DEFAULTS[template] ?? TEMPLATE_DEFAULTS.default;
   return {
     orgName,
-    primaryColor: "#3b82f6",
-    secondaryColor: "#8b5cf6",
+    primaryColor: defaults.primaryColor ?? "#3b82f6",
+    secondaryColor: defaults.secondaryColor ?? "#8b5cf6",
     dashboardTitle: `${orgName} — Agent Org`,
     welcomeMessage: `Welcome to ${orgName}'s AI Organization Platform`,
     template,

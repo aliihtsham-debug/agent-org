@@ -94,6 +94,24 @@ export class ApprovalWorkflow {
   }
 }
 
+/** Create a multi-stage approval flow from stage configs. */
+export function createMultiStageApproval(stages: ApprovalStageConfig[]): MultiStageApproval {
+  return {
+    stages,
+    currentStage: 0,
+    status: "pending",
+  };
+}
+
+/** Advance a multi-stage approval to the next stage. */
+export function advanceStage(approval: MultiStageApproval): MultiStageApproval {
+  const nextStage = approval.currentStage + 1;
+  if (nextStage >= approval.stages.length) {
+    return { ...approval, status: "approved" };
+  }
+  return { ...approval, currentStage: nextStage };
+}
+
 export function createApprovalWorkflow(): ApprovalWorkflow {
   return new ApprovalWorkflow();
 }

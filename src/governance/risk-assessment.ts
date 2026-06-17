@@ -131,9 +131,3 @@ export function riskRank(level: RiskLevel): number {
   return ranks[level];
 }
 
-/**
- * Return the higher of two risk levels.
- */
-export function maxRisk(a: RiskLevel, b: RiskLevel): RiskLevel {
-  return riskRank(a) >= riskRank(b) ? a : b;
-}

@@ -7,8 +7,6 @@ import type { AgentRole } from "../types/agent-types.js";
 
 // -- Shared helpers --
 
-const NOW = new Date().toISOString();
-
 function makeRule(partial: Partial<PolicyRule> & { id: string; name: string }): PolicyRule {
   return {
     description: "",
@@ -16,7 +14,7 @@ function makeRule(partial: Partial<PolicyRule> & { id: string; name: string }): 
     subjects: [],
     actions: [],
     priority: 100,
-    createdAt: NOW,
+    createdAt: new Date().toISOString(),
     ...partial,
   };
 }
@@ -360,11 +358,3 @@ export const BANKING_POLICY: GovernanceTemplate = {
   approvalMatrix: BANKING_APPROVAL_MATRIX,
 };
 
-// -- Export all templates --
-
-export const ALL_TEMPLATES: Record<string, GovernanceTemplate> = {
-  DEFAULT_POLICY,
-  STRICT_POLICY,
-  GOVERNMENT_POLICY,
-  BANKING_POLICY,
-};

@@ -1,6 +1,6 @@
-import type { AgentRole, AgentResult, ProjectPlan, RefinementConfig, RefinementReport, LinearSyncResult } from "../types/agent-types.js";
+import type { AgentRole, AgentResult, ProjectPlan, RefinementConfig, RefinementReport, LinearSyncResult, AgentKeyPair } from "../types/agent-types.js";
 import { ROLE_OUTPUT_DIR } from "../types/agent-types.js";
-import { writeOutput } from "../tools/file-tools.js";
+import { writeOutput, readFileIfExists } from "../tools/file-tools.js";
 import { resolve, sep } from "node:path";
 import { runPMAgent } from "../agents/pm-agent.js";
 import { runCTOAgent } from "../agents/cto-agent.js";
@@ -32,20 +32,19 @@ import { validateDelegation } from "../governance/delegation-authority.js";
 import { ApprovalWorkflow } from "../approval/approval-workflow.js";
 import { evaluateEscalation } from "../approval/risk-escalation.js";
 // Phase 8 — Identity
-import { createAgentIdentity, registerAgent } from "../identity/agent-identity.js";
+import { createAgentIdentity, registerAgent, generateKeyPair } from "../identity/agent-identity.js";
 import { createDelegationCredential, verifyDelegation } from "../identity/delegation.js";
 import { loadKeyPair } from "../identity/identity-store.js";
 // Phase 13 — Security
 import { createTEEProvider } from "../security/tee-adapter.js";
 import { createSecretsProvider } from "../security/secrets-adapter.js";
-import { createSecureRunner } from "../security/runtime-enforcement.js";
 // Phase 12 — Memory
 import { loadMemory, saveMemory, addEntry } from "../memory/agent-memory.js";
 import { calculateScore, recordEvent } from "../memory/reputation-tracker.js";
 import { addKnowledge } from "../memory/org-knowledge.js";
 import { saveCheckpoint } from "../memory/workflow-state.js";
 // Phase 15 — Templates
-import { EnterpriseOnboarding } from "../templates/enterprise-onboarding.js";
+import { runEnterpriseOnboarding } from "../templates/enterprise-onboarding.js";
 import { createWhiteLabelConfig } from "../templates/white-label.js";
 // Phase 16 — Marketplace
 import { createBlueprintRegistry } from "../marketplace/blueprint-registry.js";
@@ -89,8 +88,22 @@ export interface CEOOptions {
   whiteLabelName?: string;
 }
 
+// ── Enterprise Options (grouped for buildPlan) ──────────────────────────
+
+interface EnterpriseOptions {
+  enableIdentity: boolean;
+  enableGovernance: boolean;
+  enableAudit: boolean;
+  enableSecurity: boolean;
+  enableMemory: boolean;
+  templateName: string;
+}
+
 export async function runCEOAgent(options: CEOOptions): Promise<ProjectPlan> {
   const { idea, apiKey, baseURL, outputBase, logger, projectRoot, enableApproval = false, enableRefinement = false, linearApiKey, enableIdentity = false, enableGovernance = false, enableAudit = false, enableSecurity = false, enableMemory = false, enableMarketplace = false, templateName = "default", blueprintId = "", runOnboard = false, whiteLabelName = "" } = options;
+
+  // Capture a single timestamp for consistency across the run
+  const now = new Date().toISOString();
 
   logger.banner(`Agent Org — Product Idea: "${idea}"`);
 
@@ -102,23 +115,21 @@ export async function runCEOAgent(options: CEOOptions): Promise<ProjectPlan> {
   //  PHASE 15 — Enterprise Onboarding, Templates & White-Label
   // ══════════════════════════════════════════════════════════════════════
 
-  // ── Phase 15: Enterprise Onboarding ──
   if (runOnboard) {
     logger.info("Starting enterprise onboarding…");
-    const onboarding = new EnterpriseOnboarding();
     const existingMemory = enableMemory ? await loadMemory("ceo") : null;
     const complianceReqs = templateName === "banking" ? ["PCI-DSS", "SOX"]
       : templateName === "government" ? ["FedRAMP", "NIST-800-53"]
       : ["SOC2"];
-    const onboardResult = await onboarding.runOnboarding({
+    const onboardResult = await runEnterpriseOnboarding({
       orgName: whiteLabelName || "Enterprise",
       industry: "technology",
       teamSize: "enterprise",
       complianceRequirements: complianceReqs,
       governanceTemplate: templateName as "default" | "strict" | "government" | "banking",
       dashboardPort: 3010,
-      branding: whiteLabelName ? createWhiteLabelConfig(whiteLabelName).enabledFeatures ? { primaryColor: "#3b82f6" } : undefined : undefined,
-    });
+      branding: whiteLabelName && createWhiteLabelConfig(whiteLabelName).enabledFeatures ? { primaryColor: "#3b82f6" } : undefined,
+    }, existingMemory);
     logger.info(`Onboarding complete: ${onboardResult.success ? "success" : "failed"} (template: ${onboardResult.templateName})`);
   }
 
@@ -150,16 +161,12 @@ export async function runCEOAgent(options: CEOOptions): Promise<ProjectPlan> {
 
   // CEO identity — create if enabled
   let ceoIdentity: Awaited<ReturnType<typeof createAgentIdentity>> | null = null;
-  let ceoKeyPair: Awaited<ReturnType<typeof import("../identity/agent-identity.js")["generateKeyPair"]>> | null = null;
+  let ceoKeyPair: AgentKeyPair | null = null;
   if (enableIdentity) {
-    const { generateKeyPair } = await import("../identity/agent-identity.js");
     ceoKeyPair = await generateKeyPair();
     ceoIdentity = await createAgentIdentity("ceo", "CEO Agent");
     const registration = await registerAgent(ceoIdentity);
     logger.info(`CEO identity registered: ${registration.did} (status: ${registration.status})`);
-
-    // Phase 10: Record identity creation in audit
-    // (auditLog not yet initialized, will be caught in post-processing)
   }
 
   // ══════════════════════════════════════════════════════════════════════
@@ -189,7 +196,6 @@ export async function runCEOAgent(options: CEOOptions): Promise<ProjectPlan> {
   // ── Phase 9: Initialize governance policy engine ──
   const policyEngine = enableGovernance ? new PolicyEngine() : null;
   if (policyEngine) {
-    // Phase 15: Select governance template
     const templateMap: Record<string, typeof DEFAULT_POLICY> = {
       default: DEFAULT_POLICY,
       strict: STRICT_POLICY,
@@ -235,7 +241,6 @@ export async function runCEOAgent(options: CEOOptions): Promise<ProjectPlan> {
       } catch {
         return null; // Malformed path
       }
-      const { readFileIfExists } = await import("../tools/file-tools.js");
       return readFileIfExists(path);
     },
     projectRoot,
@@ -254,11 +259,11 @@ export async function runCEOAgent(options: CEOOptions): Promise<ProjectPlan> {
 
   // ── Phase 9: Governance — evaluate risk + delegation authority before spawning VPs ──
   if (policyEngine) {
-    const risk = assessRisk("spawn", { riskLevel: "medium", delegationDepth: 0, timestamp: new Date().toISOString() });
+    const risk = assessRisk("spawn", { riskLevel: "medium", delegationDepth: 0, timestamp: now });
     const govCtx = {
       riskLevel: risk,
       delegationDepth: 0,
-      timestamp: new Date().toISOString(),
+      timestamp: now,
     };
     const decision = policyEngine.evaluate("ceo", "spawn", govCtx);
     logger.info(`Governance evaluation: ${decision.effect} (risk: ${risk}, policy: ${decision.ruleId ?? "none"})`);
@@ -274,7 +279,7 @@ export async function runCEOAgent(options: CEOOptions): Promise<ProjectPlan> {
       updateStatus("failed");
       return {
         idea,
-        timestamp: new Date().toISOString(),
+        timestamp: now,
         pmResult: { role: "pm", status: "failed", outputPath: "", summary: "Blocked by governance policy", artifacts: [], tokenUsage: { input: 0, output: 0 }, durationMs: 0, error: "Governance deny" },
         ctoResult: { role: "cto", status: "failed", outputPath: "", summary: "Blocked by governance policy", artifacts: [], tokenUsage: { input: 0, output: 0 }, durationMs: 0, error: "Governance deny" },
         cisoResult: { role: "ciso", status: "failed", outputPath: "", summary: "Blocked by governance policy", artifacts: [], tokenUsage: { input: 0, output: 0 }, durationMs: 0, error: "Governance deny" },
@@ -286,15 +291,15 @@ export async function runCEOAgent(options: CEOOptions): Promise<ProjectPlan> {
       };
     }
     // Record policy evaluation to audit
-    if (auditLog) {
+    if (auditLog && ceoIdentity) {
       await auditLog.appendEntry({
-        agentDid: ceoIdentity ? `did:agent:${ceoIdentity.agentId}` : "did:agent:ceo",
+        agentDid: `did:agent:${ceoIdentity.agentId}`,
         action: "policy_eval",
         inputHash: `risk:${risk}`,
         outputHash: `decision:${decision.effect}`,
         inputRef: "governance-eval",
         outputRef: "governance-decision",
-        timestamp: new Date().toISOString(),
+        timestamp: now,
         eventId: `audit-${generateEventId()}`,
         signature: "",
       });
@@ -310,36 +315,17 @@ export async function runCEOAgent(options: CEOOptions): Promise<ProjectPlan> {
       outputHash: "vps-spawned",
       inputRef: idea,
       outputRef: "outputs/ceo",
-      timestamp: new Date().toISOString(),
+      timestamp: now,
       eventId: `audit-${generateEventId()}`,
       signature: ceoIdentity && ceoKeyPair
         ? await (await import("../identity/agent-identity.js")).signData(ceoIdentity, idea.slice(0, 64), ceoKeyPair)
         : "",
     });
   }
-  if (provenance) {
-    provenance.trackDecision(runId, idea);
-  }
 
   // ── Phase 8: Create VP Identities + Delegation Credentials ──
-  const vpIdentities: Record<string, { identity: Awaited<ReturnType<typeof createAgentIdentity>>; keyPair: Awaited<ReturnType<typeof import("../identity/agent-identity.js")["generateKeyPair"]>> }> = {};
   const vpRoles: AgentRole[] = ["pm", "cto", "ciso", "cfo", "coo"];
-  if (enableIdentity && ceoIdentity && ceoKeyPair) {
-    for (const vpRole of vpRoles) {
-      const { generateKeyPair, createAgentIdentity, registerAgent } = await import("../identity/agent-identity.js");
-      const vpKeyPair = await generateKeyPair();
-      const vpIdentity = await createAgentIdentity(vpRole, `${vpRole.toUpperCase()} Agent`);
-      const vpRegistration = await registerAgent(vpIdentity);
-      logger.info(`${vpRole.toUpperCase()} identity: ${vpRegistration.did}`);
-
-      // Create delegation credential: CEO → VP
-      const delegation = await createDelegationCredential(ceoIdentity, vpIdentity.agentId, ["spawn", "delegate", "write_file"], ceoKeyPair);
-      const isValid = await verifyDelegation(delegation);
-      logger.info(`Delegation CEO → ${vpRole}: ${isValid ? "verified" : "FAILED"}`);
-
-      vpIdentities[vpRole] = { identity: vpIdentity, keyPair: vpKeyPair };
-    }
-  }
+  const vpIdentities = await spawnVPIdentities(enableIdentity, ceoIdentity, ceoKeyPair, vpRoles, logger);
 
   // ── Phase 12: Load Persistent Memory for agents ──
   if (enableMemory) {
@@ -350,7 +336,7 @@ export async function runCEOAgent(options: CEOOptions): Promise<ProjectPlan> {
     // Save a checkpoint before VP spawning
     await saveCheckpoint(runId, {
       workflowId: runId,
-      timestamp: new Date().toISOString(),
+      timestamp: now,
       state: { phase: "pre-vp-spawn", idea, templateName },
       completedSteps: ["identity", "governance-init", "audit-init"],
       pendingSteps: ["vp-spawning", "ic-spawning", "refinement", "compliance"],
@@ -360,7 +346,6 @@ export async function runCEOAgent(options: CEOOptions): Promise<ProjectPlan> {
   logger.info("CEO spawning 5 VPs in parallel: PM, CTO, CISO, CFO, COO…");
 
   // Use Promise.allSettled so one VP throwing doesn't kill the whole orchestration.
-  // Each settled result is normalized to a typed AgentResult with "failed" status.
   const vpLabels = ["pm", "cto", "ciso", "cfo", "coo"] as const;
   const settled = await Promise.allSettled([
     runPMAgent(idea, ctx),
@@ -377,7 +362,7 @@ export async function runCEOAgent(options: CEOOptions): Promise<ProjectPlan> {
     logger.info(`VP ${label} threw unexpectedly: ${error}`);
     return {
       role: label,
-      status: "failed" as const,
+      status: "failed",
       outputPath: `${outputBase}/error`,
       summary: `VP ${label} failed: ${error}`,
       artifacts: [],
@@ -389,21 +374,21 @@ export async function runCEOAgent(options: CEOOptions): Promise<ProjectPlan> {
 
   const [pmResult, ctoResult, cisoResult, cfoResult, cooResult] = vpResults;
 
-  // ── Phase 10: Audit — record VP completions/failures ──
+  // ── Phase 10: Audit — record VP completions/failures (parallelized) ──
   if (auditLog) {
-    for (const vp of vpResults) {
-      await auditLog.appendEntry({
+    await Promise.all(vpResults.map((vp) =>
+      auditLog.appendEntry({
         agentDid: `did:agent:${vp.role}`,
         action: vp.status === "failed" ? "agent_fail" : "agent_complete",
         inputHash: idea.slice(0, 64),
         outputHash: vp.summary.slice(0, 64),
         inputRef: idea,
         outputRef: vp.outputPath,
-        timestamp: new Date().toISOString(),
+        timestamp: now,
         eventId: `audit-${generateEventId()}`,
         signature: "",
-      });
-    }
+      })
+    ));
   }
 
   // ── Phase 10: Provenance — track VP delegations ──
@@ -425,7 +410,7 @@ export async function runCEOAgent(options: CEOOptions): Promise<ProjectPlan> {
       logger.info(`Risk escalation triggered: ${escalation.target} (${escalation.reason})`);
       emitter.emit({
         type: "gate",
-        timestamp: new Date().toISOString(),
+        timestamp: now,
         eventId: `escalation-${generateEventId()}`,
         runId,
         summary: `Escalation: ${escalation.reason} → ${escalation.target}`,
@@ -443,8 +428,6 @@ export async function runCEOAgent(options: CEOOptions): Promise<ProjectPlan> {
   ];
 
   // Publish all VP + IC results to the registry for direct cross-agent access.
-  // SECURITY: wrap each publish in try/catch so a single invalid result doesn't
-  // prevent the rest of the results from being published.
   for (const vp of vpResults) {
     try {
       registry.publish(vp);
@@ -459,9 +442,6 @@ export async function runCEOAgent(options: CEOOptions): Promise<ProjectPlan> {
       logger.info(`Registry publish failed for IC ${ic.role}: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
-
-  // NOTE: IC disk verification removed — runICAgent() already publishes to the registry
-  // and writes output.md to disk. Re-reading 16 files (~48 syscalls) added no value.
 
   // ── Phase 6: Cross-functional refinement ──
   let refinementReport: RefinementReport | undefined;
@@ -480,7 +460,6 @@ export async function runCEOAgent(options: CEOOptions): Promise<ProjectPlan> {
     // Update VP results with refined IC results
     const vpResultsMutable = [pmResult, ctoResult, cisoResult, cfoResult, cooResult];
     for (const [, refinement] of refinements) {
-      // Update the IC results within each VP result
       for (const vpResult of vpResultsMutable) {
         if (vpResult.icResults) {
           vpResult.icResults = vpResult.icResults.map((ic) =>
@@ -510,16 +489,12 @@ export async function runCEOAgent(options: CEOOptions): Promise<ProjectPlan> {
   const failedVPs = allVPResults.filter((r) => r.status === "failed");
 
   // ── GATE 1: Review VP outputs BEFORE any external/destructive operations ──
-  // SECURITY: This gate runs before Linear sync (external API write) and git
-  // commit/push (external repo write). If the user declines here, no external
-  // side effects occur. Previously, Linear sync ran BEFORE the gate, meaning an
-  // external API had already been written to before the user could approve.
   let userCancelled = false;
   if (enableApproval) {
     emitter.emit({
       type: "gate",
-      timestamp: new Date().toISOString(),
-      eventId: `gate-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      timestamp: now,
+      eventId: `gate-${generateEventId()}`,
       runId,
       summary: `VP outputs ready: ${succeededVPs.length} succeeded, ${failedVPs.length} failed`,
     });
@@ -535,15 +510,12 @@ export async function runCEOAgent(options: CEOOptions): Promise<ProjectPlan> {
   // ── Phase 7: Linear project sync (after approval gate) ──
   let linearSyncResult: LinearSyncResult | undefined;
   if (!userCancelled && linearApiKey) {
-    // GATE 2: Separate approval for external API write (Linear sync).
-    // SECURITY: Linear creates/updates entities in an external project management
-    // system. A dedicated gate ensures the user can reject this independently.
     let linearApproved = true;
     if (enableApproval) {
       emitter.emit({
         type: "gate",
-        timestamp: new Date().toISOString(),
-        eventId: `gate-linear-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        timestamp: now,
+        eventId: `gate-linear-${generateEventId()}`,
         runId,
         summary: "Linear sync will write to external Linear API",
       });
@@ -561,17 +533,15 @@ export async function runCEOAgent(options: CEOOptions): Promise<ProjectPlan> {
         const { runLinearMapper } = await import("../agents/linear-mapper-agent.js");
         const { syncToLinear } = await import("../tools/linear-sync.js");
 
-        // Step 1: Mapper agent reads all outputs -> linear-import.json
         const mapperResult = await runLinearMapper(idea, ctx, registry);
 
         if (mapperResult.success && mapperResult.import) {
-          // Step 2: Sync structured data to Linear
           linearSyncResult = await syncToLinear({
             apiKey: linearApiKey,
             linearImport: mapperResult.import,
             project: {
               idea,
-              timestamp: new Date().toISOString(),
+              timestamp: now,
               pmResult,
               ctoResult,
               cisoResult,
@@ -596,7 +566,6 @@ export async function runCEOAgent(options: CEOOptions): Promise<ProjectPlan> {
   }
 
   // Commit each agent's artifacts on role-specific branches (after all gates).
-  // Parallelized: each agent commits to its own branch, so no conflicts.
   if (!userCancelled) {
     const agentsToCommit = [
       ...allVPResults.map((r) => ({ role: r.role, artifacts: r.artifacts, summary: r.summary, result: r })),
@@ -611,39 +580,35 @@ export async function runCEOAgent(options: CEOOptions): Promise<ProjectPlan> {
           logger.info(`${role} artifacts committed on branch ${branch}`);
           pushBranchAndCreatePR({ projectRoot, branchName: branch, role, summary });
         } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          logger.info(`${role} git commit failed (non-fatal): ${msg}`);
+          logger.info(`${role} git commit failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
         }
         try {
           onArtifact(result, projectRoot);
         } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          logger.info(`${role} artifact registration failed (non-fatal): ${msg}`);
+          logger.info(`${role} artifact registration failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
         }
       }),
     );
   }
 
-  // ── Phase 12: Record reputation + save memory + organizational knowledge ──
+  // ── Phase 12: Record reputation + save memory (parallelized) ──
   if (enableMemory) {
     const allResults = [...vpResults, ...icResults];
     const allFailed = vpResults.every((r) => r.status === "failed");
-    for (const result of allResults) {
+    await Promise.all(allResults.map(async (result) => {
       const event = result.status === "completed"
-        ? { timestamp: new Date().toISOString(), projectId: runId, event: "completion" as const, delta: 5, details: `Completed: ${result.summary.slice(0, 80)}` }
-        : { timestamp: new Date().toISOString(), projectId: runId, event: "failure" as const, delta: -10, details: `Failed: ${result.error ?? "unknown"}` };
+        ? { timestamp: now, projectId: runId, event: "completion" as const, delta: 5, details: `Completed: ${result.summary.slice(0, 80)}` }
+        : { timestamp: now, projectId: runId, event: "failure" as const, delta: -10, details: `Failed: ${result.error ?? "unknown"}` };
       await recordEvent(result.role, event);
-
-      // Save agent memory entry
       await addEntry(result.role, {
-        timestamp: new Date().toISOString(),
+        timestamp: now,
         projectId: runId,
         type: result.status === "completed" ? "outcome" : "lesson",
         content: result.summary,
         importance: result.status === "completed" ? 0.7 : 0.9,
         tags: [result.role, result.status, templateName],
       });
-    }
+    }));
 
     // Add organizational knowledge
     await addKnowledge({
@@ -657,7 +622,7 @@ export async function runCEOAgent(options: CEOOptions): Promise<ProjectPlan> {
     // Save final checkpoint
     await saveCheckpoint(runId, {
       workflowId: runId,
-      timestamp: new Date().toISOString(),
+      timestamp: now,
       state: { phase: "complete", idea, templateName, totalAgents: allResults.length },
       completedSteps: ["identity", "governance-init", "audit-init", "vp-spawning", "ic-spawning", "compliance"],
       pendingSteps: [],
@@ -679,8 +644,43 @@ export async function runCEOAgent(options: CEOOptions): Promise<ProjectPlan> {
     logger.info(`Compliance report generated: ${complianceReport.findings.length} findings (${standard}) → ${reportPath}`);
   }
 
-  return await buildPlan(idea, outputBase, vpResults, icResults, logger, projectRoot, onArtifact, refinementReport, linearSyncResult, auditLog, provenance, complianceReport, enableIdentity, enableGovernance, enableAudit, enableSecurity, enableMemory);
+  const enterprise: EnterpriseOptions = { enableIdentity, enableGovernance, enableAudit, enableSecurity, enableMemory, templateName };
+
+  return await buildPlan(idea, outputBase, vpResults, icResults, logger, projectRoot, onArtifact, refinementReport, linearSyncResult, auditLog, provenance, complianceReport, enterprise);
 }
+
+// ── Helper: Spawn VP identities + delegation credentials ─────────────────
+
+async function spawnVPIdentities(
+  enableIdentity: boolean,
+  ceoIdentity: Awaited<ReturnType<typeof createAgentIdentity>> | null,
+  ceoKeyPair: AgentKeyPair | null,
+  vpRoles: AgentRole[],
+  logger: AgentLogger,
+): Promise<Record<string, { identity: Awaited<ReturnType<typeof createAgentIdentity>>; keyPair: AgentKeyPair }>> {
+  if (!enableIdentity || !ceoIdentity || !ceoKeyPair) return {};
+  const vpIdentities: Record<string, { identity: Awaited<ReturnType<typeof createAgentIdentity>>; keyPair: AgentKeyPair }> = {};
+  // Generate all VP key pairs and identities in parallel
+  const vpEntries = await Promise.all(vpRoles.map(async (vpRole) => {
+    const vpKeyPair = await generateKeyPair();
+    const vpIdentity = await createAgentIdentity(vpRole, `${vpRole.toUpperCase()} Agent`);
+    const vpRegistration = await registerAgent(vpIdentity);
+    logger.info(`${vpRole.toUpperCase()} identity: ${vpRegistration.did}`);
+
+    // Create delegation credential: CEO → VP
+    const delegation = await createDelegationCredential(ceoIdentity, vpIdentity.agentId, ["spawn", "delegate", "write_file"], ceoKeyPair);
+    const isValid = await verifyDelegation(delegation);
+    logger.info(`Delegation CEO → ${vpRole}: ${isValid ? "verified" : "FAILED"}`);
+
+    return [vpRole, { identity: vpIdentity, keyPair: vpKeyPair }] as const;
+  }));
+  for (const [role, entry] of vpEntries) {
+    vpIdentities[role] = entry;
+  }
+  return vpIdentities;
+}
+
+// ── Build Plan ───────────────────────────────────────────────────────────
 
 async function buildPlan(
   idea: string,
@@ -695,13 +695,11 @@ async function buildPlan(
   auditLog?: AuditLog | null,
   provenance?: ProvenanceTracker | null,
   complianceReport?: ComplianceReport,
-  enableIdentity?: boolean,
-  enableGovernance?: boolean,
-  enableAudit?: boolean,
-  enableSecurity?: boolean,
-  enableMemory?: boolean,
-  templateName?: string,
+  enterprise?: EnterpriseOptions,
 ): Promise<ProjectPlan> {
+  const now = new Date().toISOString();
+  const { enableIdentity = false, enableGovernance = false, enableAudit = false, enableSecurity = false, enableMemory = false, templateName = "default" } = enterprise ?? {};
+
   // Determine overall status
   const gaps: string[] = [];
   const vpLabels: { result: AgentResult; label: string }[] = [
@@ -735,7 +733,7 @@ async function buildPlan(
 
   const plan: ProjectPlan = {
     idea,
-    timestamp: new Date().toISOString(),
+    timestamp: now,
     pmResult,
     ctoResult,
     cisoResult,
@@ -746,15 +744,14 @@ async function buildPlan(
     gaps,
     refinementReport,
     linearSync: linearSyncResult,
-    // Phase 8-16: Enterprise metadata
     complianceReport,
     enterpriseMeta: {
-      identityEnabled: enableIdentity ?? false,
-      governanceEnabled: enableGovernance ?? false,
-      auditEnabled: enableAudit ?? false,
-      securityEnabled: enableSecurity ?? false,
-      memoryEnabled: enableMemory ?? false,
-      templateName: templateName ?? "default",
+      identityEnabled: enableIdentity,
+      governanceEnabled: enableGovernance,
+      auditEnabled: enableAudit,
+      securityEnabled: enableSecurity,
+      memoryEnabled: enableMemory,
+      templateName,
       totalAgents: vpResults.length + icResults.length,
       signedActions: enableAudit && auditLog ? (await auditLog.getEntries()).length : 0,
     },
@@ -802,7 +799,7 @@ async function buildPlan(
       outputHash: `status:${plan.status}`,
       inputRef: idea,
       outputRef: `${outputBase}/project-plan.json`,
-      timestamp: new Date().toISOString(),
+      timestamp: now,
       eventId: `audit-${generateEventId()}`,
       signature: "",
     });
@@ -813,6 +810,8 @@ async function buildPlan(
   return plan;
 }
 
+// ── Write Plan (Markdown) ────────────────────────────────────────────────
+
 async function writePlan(plan: ProjectPlan, outputBase: string): Promise<void> {
   // JSON plan for programmatic consumption
   await writeOutput(
@@ -820,68 +819,14 @@ async function writePlan(plan: ProjectPlan, outputBase: string): Promise<void> {
     JSON.stringify(plan, null, 2),
   );
 
-  // Markdown plan for human reading
   const vpRows = (label: string, result: AgentResult) =>
     `| ${label} | ${result.status} | ${result.summary} | ${result.artifacts.join(", ") || "none"} |`;
-
-  const refinementSection = plan.refinementReport
-    ? `
-
-## Refinement (Phase 6)
-
-| Metric | Value |
-|--------|-------|
-| Total Reviews | ${plan.refinementReport.totalReviews} |
-| Actionable Critiques | ${plan.refinementReport.actionableCritiques} |
-| Agents Refined | ${plan.refinementReport.refinedAgents.join(", ") || "none"} |
-
-### Critiques
-
-${plan.refinementReport.critiques.map((c) => `- **${c.reviewer} → ${c.reviewee}** (${c.severity}): ${c.findings.join("; ")}`).join("\n") || "_No critiques_"}
-`
-    : "";
-
-  // Phase 8-16: Enterprise section
-  const enterpriseSection = plan.enterpriseMeta
-    ? `
-
-## Enterprise Features (Phases 8-16)
-
-| Feature | Status |
-|---------|--------|
-| Agent Identity (Phase 8) | ${plan.enterpriseMeta.identityEnabled ? "✅ Enabled" : "❌ Disabled"} |
-| Governance Policy (Phase 9) | ${plan.enterpriseMeta.governanceEnabled ? "✅ Enabled" : "❌ Disabled"} |
-| Audit System (Phase 10) | ${plan.enterpriseMeta.auditEnabled ? "✅ Enabled" : "❌ Disabled"} |
-| Security Platform (Phase 13) | ${plan.enterpriseMeta.securityEnabled ? "✅ Enabled" : "❌ Disabled"} |
-| Agent Memory (Phase 12) | ${plan.enterpriseMeta.memoryEnabled ? "✅ Enabled" : "❌ Disabled"} |
-| Template | ${plan.enterpriseMeta.templateName} |
-| Total Agents | ${plan.enterpriseMeta.totalAgents} |
-| Signed Actions | ${plan.enterpriseMeta.signedActions} |
-`
-    : "";
-
-  const complianceSection = plan.complianceReport
-    ? `
-
-## Compliance Report (Phase 10)
-
-**Standard:** ${plan.complianceReport.standard}
-**Generated:** ${plan.complianceReport.generatedAt}
-**Scope:** ${plan.complianceReport.scope}
-
-### Findings
-
-| Severity | Description | Remediation |
-|----------|-------------|-------------|
-${plan.complianceReport.findings.map((f) => `| ${f.severity} | ${f.description} | ${f.remediation ?? "N/A"} |`).join("\n") || "| — | No findings | — |"}
-`
-    : "";
 
   const md = `# Project Plan: ${plan.idea}
 
 **Generated:** ${plan.timestamp}
 **Status:** ${plan.status}
-**Overall:** ${plan.gaps.length > 0 ? plan.gaps.join("; ") : "All agents completed successfully"}${refinementSection}
+**Overall:** ${plan.gaps.length > 0 ? plan.gaps.join("; ") : "All agents completed successfully"}${buildRefinementSection(plan.refinementReport)}
 
 ---
 
@@ -912,11 +857,68 @@ ${plan.icResults.map((r) => `| ${r.role} | ${r.status} | ${r.summary} |`).join("
 | COO | ${plan.cooResult.tokenUsage.input.toLocaleString()} | ${plan.cooResult.tokenUsage.output.toLocaleString()} |
 ${plan.icResults.map((r) => `| ${r.role} | ${r.tokenUsage.input.toLocaleString()} | ${r.tokenUsage.output.toLocaleString()} |`).join("\n")}
 | **Total (VPs)** | **${(plan.pmResult.tokenUsage.input + plan.ctoResult.tokenUsage.input + plan.cisoResult.tokenUsage.input + plan.cfoResult.tokenUsage.input + plan.cooResult.tokenUsage.input).toLocaleString()}** | **${(plan.pmResult.tokenUsage.output + plan.ctoResult.tokenUsage.output + plan.cisoResult.tokenUsage.output + plan.cfoResult.tokenUsage.output + plan.cooResult.tokenUsage.output).toLocaleString()}** |
-${enterpriseSection}${complianceSection}
+${buildEnterpriseSection(plan.enterpriseMeta)}${buildComplianceSection(plan.complianceReport)}
 ---
 
 *Generated by Agent Org v0.5.0 — Enterprise Edition*
 `;
 
   await writeOutput(`${outputBase}/project-plan.md`, md);
+}
+
+// ── Plan section builders ─────────────────────────────────────────────────
+
+function buildRefinementSection(refinementReport?: RefinementReport): string {
+  if (!refinementReport) return "";
+  return `
+
+## Refinement (Phase 6)
+
+| Metric | Value |
+|--------|-------|
+| Total Reviews | ${refinementReport.totalReviews} |
+| Actionable Critiques | ${refinementReport.actionableCritiques} |
+| Agents Refined | ${refinementReport.refinedAgents.join(", ") || "none"} |
+
+### Critiques
+
+${refinementReport.critiques.map((c) => `- **${c.reviewer} → ${c.reviewee}** (${c.severity}): ${c.findings.join("; ")}`).join("\n") || "_No critiques_"}
+`;
+}
+
+function buildEnterpriseSection(enterpriseMeta?: ProjectPlan["enterpriseMeta"]): string {
+  if (!enterpriseMeta) return "";
+  return `
+
+## Enterprise Features (Phases 8-16)
+
+| Feature | Status |
+|---------|--------|
+| Agent Identity (Phase 8) | ${enterpriseMeta.identityEnabled ? "✅ Enabled" : "❌ Disabled"} |
+| Governance Policy (Phase 9) | ${enterpriseMeta.governanceEnabled ? "✅ Enabled" : "❌ Disabled"} |
+| Audit System (Phase 10) | ${enterpriseMeta.auditEnabled ? "✅ Enabled" : "❌ Disabled"} |
+| Security Platform (Phase 13) | ${enterpriseMeta.securityEnabled ? "✅ Enabled" : "❌ Disabled"} |
+| Agent Memory (Phase 12) | ${enterpriseMeta.memoryEnabled ? "✅ Enabled" : "❌ Disabled"} |
+| Template | ${enterpriseMeta.templateName} |
+| Total Agents | ${enterpriseMeta.totalAgents} |
+| Signed Actions | ${enterpriseMeta.signedActions} |
+`;
+}
+
+function buildComplianceSection(complianceReport?: ComplianceReport): string {
+  if (!complianceReport) return "";
+  return `
+
+## Compliance Report (Phase 10)
+
+**Standard:** ${complianceReport.standard}
+**Generated:** ${complianceReport.generatedAt}
+**Scope:** ${complianceReport.scope}
+
+### Findings
+
+| Severity | Description | Remediation |
+|----------|-------------|-------------|
+${complianceReport.findings.map((f) => `| ${f.severity} | ${f.description} | ${f.remediation ?? "N/A"} |`).join("\n") || "| — | No findings | — |"}
+`;
 }

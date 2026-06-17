@@ -71,6 +71,36 @@ const ROLE_LABELS: Record<AgentRole, string> = {
   "linear-mapper": "LIN",
 };
 
+/** Maps each role to its logical parent in the org chart. */
+const ROLE_PARENT: Record<AgentRole, AgentRole> = {
+  ceo: "ceo",
+  cto: "ceo",
+  pm: "ceo",
+  ciso: "ceo",
+  cfo: "ceo",
+  coo: "ceo",
+  "engineering-manager": "cto",
+  "qa-manager": "cto",
+  "frontend-engineer": "engineering-manager",
+  "backend-engineer": "engineering-manager",
+  "ai-engineer": "engineering-manager",
+  "devops-agent": "engineering-manager",
+  "testing-agent": "qa-manager",
+  "performance-agent": "qa-manager",
+  "security-auditor": "ciso",
+  "vuln-scanner": "ciso",
+  "compliance-agent": "ciso",
+  "budget-agent": "cfo",
+  "pricing-agent": "cfo",
+  "scheduler-agent": "coo",
+  "workflow-agent": "coo",
+  "monitoring-agent": "coo",
+  "ux-researcher": "pm",
+  "roadmap-agent": "pm",
+  "analytics-agent": "pm",
+  "linear-mapper": "ceo",
+};
+
 export class AgentLogger {
   private logs: DelegationLog[] = [];
   private startTime = Date.now();
@@ -120,26 +150,9 @@ export class AgentLogger {
     return eventId;
   }
 
-  /** Determine the logical parent of a role for logging */
+  /** Determine the logical parent of a role for logging. */
   getParentRole(child: AgentRole): AgentRole {
-    if (child === "ceo") return "ceo";
-    // VP-level: report to CEO
-    if (child === "cto" || child === "pm" || child === "ciso" || child === "cfo" || child === "coo") return "ceo";
-    // Manager-level: report to their VP
-    if (child === "engineering-manager" || child === "qa-manager") return "cto";
-    // Engineering ICs: report to Engineering Manager
-    if (child === "frontend-engineer" || child === "backend-engineer" || child === "ai-engineer" || child === "devops-agent") return "engineering-manager";
-    // QA ICs: report to QA Manager
-    if (child === "testing-agent" || child === "performance-agent") return "qa-manager";
-    // Security ICs: report to CISO
-    if (child === "security-auditor" || child === "vuln-scanner" || child === "compliance-agent") return "ciso";
-    // Finance ICs: report to CFO
-    if (child === "budget-agent" || child === "pricing-agent") return "cfo";
-    // Operations ICs: report to COO
-    if (child === "scheduler-agent" || child === "workflow-agent" || child === "monitoring-agent") return "coo";
-    // PM sub-agents: report to PM
-    if (child === "ux-researcher" || child === "roadmap-agent" || child === "analytics-agent") return "pm";
-    return "ceo"; // fallback
+    return ROLE_PARENT[child] ?? "ceo";
   }
 
   complete(role: AgentRole, summary: string, parentEventId?: string): void {
@@ -309,9 +322,3 @@ export function colorize(text: string): string {
   }
   return result;
 }
-
-// Monkey-patch console.log to auto-colorize
-const origLog = console.log;
-console.log = (...args: unknown[]) => {
-  origLog(...args.map(a => typeof a === "string" ? colorize(a) : a));
-};

@@ -6,7 +6,7 @@ import { runAgentWithRetry, type AgentContext } from "./base-agent.js";
  * All IC (Individual Contributor) roles across every branch.
  * These are leaf agents — they produce output but never spawn children.
  */
-export type ICRole =
+type ICRole =
   // Engineering
   | "frontend-engineer"
   | "backend-engineer"
@@ -26,17 +26,33 @@ export type ICRole =
   | "scheduler-agent"
   | "workflow-agent"
   | "monitoring-agent"
-  // Phase 3 — PM sub-agents
+  // PM sub-agents
   | "ux-researcher"
   | "roadmap-agent"
   | "analytics-agent";
 
-/** Subdirectory for a given IC role, sourced from the shared ROLE_OUTPUT_DIR. */
-function outputDir(role: ICRole): string {
-  return ROLE_OUTPUT_DIR[role];
-}
+/** Task description templates per IC role. */
+const IC_TASK_TEMPLATES: Record<ICRole, string> = {
+  "frontend-engineer": "Build the frontend scaffold for",
+  "backend-engineer": "Build the backend scaffold for",
+  "ai-engineer": "Build the AI/ML integration scaffold for",
+  "devops-agent": "Create the DevOps/deployment plan for",
+  "testing-agent": "Create a test plan and example tests for",
+  "performance-agent": "Create a performance testing and optimization plan for",
+  "security-auditor": "Perform a security audit and threat model for",
+  "vuln-scanner": "Perform a vulnerability scan and dependency audit for",
+  "compliance-agent": "Perform a compliance assessment for",
+  "budget-agent": "Create a budget proposal and cost breakdown for",
+  "pricing-agent": "Create a pricing strategy and model for",
+  "scheduler-agent": "Create a project schedule and sprint plan for",
+  "workflow-agent": "Create a workflow specification and development process for",
+  "monitoring-agent": "Create a monitoring and alerting plan for",
+  "ux-researcher": "Create a UX research plan for",
+  "roadmap-agent": "Create a product roadmap for",
+  "analytics-agent": "Create an analytics and metrics plan for",
+};
 
-export function createICTask(
+function createICTask(
   role: ICRole,
   idea: string,
   architectureSummary: string,
@@ -45,69 +61,9 @@ export function createICTask(
   extraContext = "",
 ): TaskSpec {
   const id = `${role}-${Date.now()}`;
-  const subdir = outputDir(role);
+  const subdir = ROLE_OUTPUT_DIR[role];
   const outputPath = `${outputBase}/${subdir}/${role}`;
-
-  let task: string; // reassigned in switch cases below
-  switch (role) {
-    // ── Engineering ──────────────────────────────────────────────────
-    case "frontend-engineer":
-      task = `Build the frontend scaffold for: "${idea}"`;
-      break;
-    case "backend-engineer":
-      task = `Build the backend scaffold for: "${idea}"`;
-      break;
-    case "ai-engineer":
-      task = `Build the AI/ML integration scaffold for: "${idea}"`;
-      break;
-    case "devops-agent":
-      task = `Create the DevOps/deployment plan for: "${idea}"`;
-      break;
-    // ── QA ───────────────────────────────────────────────────────────
-    case "testing-agent":
-      task = `Create a test plan and example tests for: "${idea}"`;
-      break;
-    case "performance-agent":
-      task = `Create a performance testing and optimization plan for: "${idea}"`;
-      break;
-    // ── Security ─────────────────────────────────────────────────────
-    case "security-auditor":
-      task = `Perform a security audit and threat model for: "${idea}"`;
-      break;
-    case "vuln-scanner":
-      task = `Perform a vulnerability scan and dependency audit for: "${idea}"`;
-      break;
-    case "compliance-agent":
-      task = `Perform a compliance assessment for: "${idea}"`;
-      break;
-    // ── Finance ──────────────────────────────────────────────────────
-    case "budget-agent":
-      task = `Create a budget proposal and cost breakdown for: "${idea}"`;
-      break;
-    case "pricing-agent":
-      task = `Create a pricing strategy and model for: "${idea}"`;
-      break;
-    // ── Operations ───────────────────────────────────────────────────
-    case "scheduler-agent":
-      task = `Create a project schedule and sprint plan for: "${idea}"`;
-      break;
-    case "workflow-agent":
-      task = `Create a workflow specification and development process for: "${idea}"`;
-      break;
-    case "monitoring-agent":
-      task = `Create a monitoring and alerting plan for: "${idea}"`;
-      break;
-    // ── PM sub-agents ─────────────────────────────────────────────────
-    case "ux-researcher":
-      task = `Create a UX research plan for: "${idea}"`;
-      break;
-    case "roadmap-agent":
-      task = `Create a product roadmap for: "${idea}"`;
-      break;
-    case "analytics-agent":
-      task = `Create an analytics and metrics plan for: "${idea}"`;
-      break;
-  }
+  const task = `${IC_TASK_TEMPLATES[role]}: "${idea}"`;
 
   const contextParts = [
     architectureSummary ? `## Architecture Summary\n${architectureSummary}` : "",
@@ -124,7 +80,7 @@ export function createICTask(
   };
 }
 
-export async function runICAgent(
+async function runICAgent(
   role: ICRole,
   idea: string,
   ctx: AgentContext,
@@ -147,6 +103,20 @@ export async function runICAgent(
   return result;
 }
 
+/** Generic branch IC spawner — replaces 6 branch-specific functions. */
+async function runBranchICs(
+  roles: ICRole[],
+  idea: string,
+  ctx: AgentContext,
+  summaries: { arch?: string; product?: string; extra?: string },
+): Promise<AgentResult[]> {
+  return Promise.all(
+    roles.map((role) =>
+      runICAgent(role, idea, ctx, summaries.arch ?? "", summaries.product ?? "", summaries.extra ?? ""),
+    ),
+  );
+}
+
 // ── Branch-specific spawn functions ─────────────────────────────────────
 
 /** Engineering ICs: spawned by Engineering Manager */
@@ -157,9 +127,9 @@ export async function runEngineeringICs(
   productSummary: string,
   engPlanSummary: string,
 ): Promise<AgentResult[]> {
-  const roles: ICRole[] = ["frontend-engineer", "backend-engineer", "ai-engineer", "devops-agent"];
-  return Promise.all(
-    roles.map((role) => runICAgent(role, idea, ctx, archSummary, productSummary, engPlanSummary)),
+  return runBranchICs(
+    ["frontend-engineer", "backend-engineer", "ai-engineer", "devops-agent"],
+    idea, ctx, { arch: archSummary, product: productSummary, extra: engPlanSummary },
   );
 }
 
@@ -171,9 +141,9 @@ export async function runQAICs(
   productSummary: string,
   qaStrategySummary: string,
 ): Promise<AgentResult[]> {
-  const roles: ICRole[] = ["testing-agent", "performance-agent"];
-  return Promise.all(
-    roles.map((role) => runICAgent(role, idea, ctx, archSummary, productSummary, qaStrategySummary)),
+  return runBranchICs(
+    ["testing-agent", "performance-agent"],
+    idea, ctx, { arch: archSummary, product: productSummary, extra: qaStrategySummary },
   );
 }
 
@@ -183,9 +153,9 @@ export async function runSecurityICs(
   ctx: AgentContext,
   securityStrategySummary: string,
 ): Promise<AgentResult[]> {
-  const roles: ICRole[] = ["security-auditor", "vuln-scanner", "compliance-agent"];
-  return Promise.all(
-    roles.map((role) => runICAgent(role, idea, ctx, "", "", securityStrategySummary)),
+  return runBranchICs(
+    ["security-auditor", "vuln-scanner", "compliance-agent"],
+    idea, ctx, { extra: securityStrategySummary },
   );
 }
 
@@ -195,9 +165,9 @@ export async function runFinanceICs(
   ctx: AgentContext,
   financialSummary: string,
 ): Promise<AgentResult[]> {
-  const roles: ICRole[] = ["budget-agent", "pricing-agent"];
-  return Promise.all(
-    roles.map((role) => runICAgent(role, idea, ctx, "", "", financialSummary)),
+  return runBranchICs(
+    ["budget-agent", "pricing-agent"],
+    idea, ctx, { extra: financialSummary },
   );
 }
 
@@ -207,9 +177,9 @@ export async function runOperationsICs(
   ctx: AgentContext,
   opsSummary: string,
 ): Promise<AgentResult[]> {
-  const roles: ICRole[] = ["scheduler-agent", "workflow-agent", "monitoring-agent"];
-  return Promise.all(
-    roles.map((role) => runICAgent(role, idea, ctx, "", "", opsSummary)),
+  return runBranchICs(
+    ["scheduler-agent", "workflow-agent", "monitoring-agent"],
+    idea, ctx, { extra: opsSummary },
   );
 }
 
@@ -219,8 +189,8 @@ export async function runPMICs(
   ctx: AgentContext,
   productStrategySummary: string,
 ): Promise<AgentResult[]> {
-  const roles: ICRole[] = ["ux-researcher", "roadmap-agent", "analytics-agent"];
-  return Promise.all(
-    roles.map((role) => runICAgent(role, idea, ctx, "", "", productStrategySummary)),
+  return runBranchICs(
+    ["ux-researcher", "roadmap-agent", "analytics-agent"],
+    idea, ctx, { extra: productStrategySummary },
   );
 }
