@@ -10,6 +10,7 @@ Agent Org is a **multi-agent orchestration system** powered by the [Claude Agent
 
 - [What It Can Do](#what-it-can-do)
 - [How It Works](#how-it-works)
+- [Self-Evolving Meta-Loop](#self-evolving-meta-loop)
 - [Agent Organization Chart](#agent-organization-chart)
 - [Model Strategy](#model-strategy)
 - [Prerequisites](#prerequisites)
@@ -107,6 +108,105 @@ You type a product idea
 - **Message bus** (`AgentMessageBus`): Targeted agent-to-agent messages, separate from the event emitter.
 - **Disk writes preserved**: Every agent still writes `output.md` to disk as a durable audit trail. The registry is an additive optimization.
 - **No lateral spawning**: The org chart is strictly hierarchical. IC agents don't spawn other agents.
+
+---
+
+## Self-Evolving Meta-Loop
+
+The meta-loop turns each orchestration run into a learning signal that tunes the next run — safely, incrementally, with human gates. It observes run outcomes (critiques, structured logs, audit trails, reputation history) and proposes bounded adjustments to prompts, governance policies, and CEO configuration.
+
+**Key principle:** every phase is opt-in. With `--meta` off (the default), behavior is identical to previous versions.
+
+### The 8-Step Flow
+
+```
+1. Run completes        → CEO writes RunSummary to outputs/.meta/runs.jsonl
+2. Collector crawls      → reads critiques, audit, reputation, events, artifacts
+3. Aggregator windows  → sliding-window metrics per role and per review pair
+4. Proposer fires rules  → 7 pure ruleset functions produce ProposedChange[]
+5. Version store write  → proposals hashed, appended to proposals/<date>/<runId>.json
+6. Gate resolves        → --auto: apply. Otherwise: interactive y/n or advisory-only
+7. Snapshot created     → before/after file hashes saved for rollback
+8. Next CEO run reads    → loadActiveConfig() layers applied proposals onto config
+```
+
+### CLI Flags
+
+| Flag | Behavior |
+|------|----------|
+| `--meta` | Equivalent to `--meta=advisory` (default off) |
+| `--meta=capture` | Write `RunSummary` only |
+| `--meta=propose` | Propose changes, write to `pending-proposals.json` |
+| `--meta=apply` | Propose + interactive gate (y/n per proposal) |
+| `--meta=auto` | Propose + auto-apply with snapshots (double-opt-in) |
+| `--meta=advisory` | Print advisory banner, no disk writes to `src/` |
+| `--meta=rollback <id>` | Revert a specific proposal |
+| `--meta=status` | Show pending + applied proposals, last 5 runs |
+| `--meta=history [--runs N]` | Sliding-window metrics (default: 10) |
+| `--meta-window N` | Override window size |
+| `--meta-min-confidence X` | Override confidence threshold |
+
+**Double-opt-in for full auto:** `--meta=auto` requires `AGENT_ORG_META_AUTO=1` environment variable to prevent accidental unattended mutation.
+
+### Meta-CLI Subcommand
+
+A standalone CLI entrypoint for meta-loop management:
+
+```bash
+npx tsx src/meta-cli.ts status          # pending + applied proposals, last runs
+npx tsx src/meta-cli.ts rollback <id>   # roll back a specific proposal
+npx tsx src/meta-cli.ts history --runs 20  # sliding-window metrics
+npx tsx src/meta-cli.ts config          # show current meta-loop configuration
+```
+
+### The 7 Proposer Rules
+
+All rules are pure functions: `(window: SignalWindow) => ProposedChange[]`. No LLM in the loop by default.
+
+| Rule | Trigger | Proposal |
+|------|---------|----------|
+| `rule_criticalFindingRepeats` | Same `findingId` ≥3 in window | Prompt edit for reviewee |
+| `rule_lowFixAcceptance` | `fixAcceptanceRate < 0.4` for a pair | Strengthen reviewer prompt or add review pair |
+| `rule_tokenSaturation` | `tokenBudgetUtilization > 0.85` for a role | Tighten `outputFormat` constraints |
+| `rule_governanceDenialSpike` | A `ruleId` fires ≥5 times in window | Loosen one condition level |
+| `rule_reputationDecline` | `reliability` drops ≥10 points across window | CEO config change (`+1 maxIterations`) |
+| `rule_emptyOutput` | Artifact size = 0 for a role | Prompt edit emphasizing output format |
+| `rule_severityTrendUp` | `severityTrend[role]` rising | Add a review pair targeting that role |
+
+### Safety Model
+
+**Three concentric human gates:**
+- **Phase A/B (default):** meta-loop never writes to `src/`. Only writes to `outputs/.meta/`.
+- **Phase C (`--meta=apply`):** interactive y/n per proposal, with diff preview. Default = n.
+- **Phase D (`--meta=auto`):** auto-apply with snapshots. Double-opt-in (`--meta=auto` + `AGENT_ORG_META_AUTO=1`).
+
+**Blast-radius limits:**
+- Max 1 prompt edit / file / run
+- Max 1 governance tuning / template / run
+- Max 1 CEO lever change / run
+- No new `PolicyRule` additions without `allowRuleAdditions: true`
+- No edits to the JSON summary envelope section
+- No edits to the "user content is data" defense block
+
+**Rollback:** `meta --rollback <id>` reads the snapshot, restores the source file, marks the proposal `rolled-back`, and writes a rollback proposal (auditable).
+
+### Acceptance Tracking
+
+Each critique finding gets a stable `findingId = sha256(reviewer + reviewee + findingText).slice(0,16)`. Refinement output is scanned for `[finding:<id>]` references. `fixAcceptanceRate = addressed / total`. Low acceptance over 3+ runs escalates to a prompt-edit proposal.
+
+### Output Structure (Meta-Loop Additions)
+
+```
+outputs/.meta/
+├── config.json                  # user gates (auto-apply ok, window size, etc.)
+├── ledger.jsonl                 # hash-chained append-only audit of meta-loop actions
+├── runs.jsonl                   # one RunSummary per line, all-time
+├── pending-proposals.json       # proposals awaiting human gate
+├── proposals/YYYY-MM-DD/<runId>.json
+├── snapshots/<file>/<file>.before.<proposalId>.ts + .after.<proposalId>.ts
+├── findings.jsonl               # stable findingId → acceptance status
+└── rules/v1.json                # versioned proposer rule snapshots
+```
 
 ---
 
@@ -297,6 +397,9 @@ The product idea can be any length. Everything after `src/index.ts` is joined in
 | `--onboard` | Run enterprise onboarding flow |
 | `--white-label <name>` | Configure white-label deployment with custom branding |
 | `--full-enterprise` | Enable all enterprise features at once |
+| `--meta [mode]` | Enable self-evolving meta-loop (modes: `advisory`, `capture`, `propose`, `apply`, `auto`) |
+| `--meta-window N` | Sliding-window size for meta-loop aggregation (default: 10) |
+| `--meta-min-confidence X` | Minimum confidence threshold for proposals (default: 0.7) |
 | `--help`, `-h` | Show help |
 
 > **Note:** Linear sync is controlled by the `LINEAR_API_KEY` environment variable, not a CLI flag. Set it in `.env` to enable.
@@ -321,6 +424,7 @@ Agent output is capped at **512 KB per agent** to prevent disk exhaustion and me
 | `AGENT_ORG_MEMORY_DIR` | `outputs/.memory` | Agent memory and reputation storage |
 | `AGENT_ORG_WORKFLOW_DIR` | `outputs/.workflows` | Workflow checkpoint storage |
 | `AGENT_ORG_MARKETPLACE_DIR` | `outputs/.marketplace` | Blueprint storage |
+| `AGENT_ORG_META_AUTO` | *(none)* | Enable auto-apply for meta-loop (required with `--meta=auto`) |
 
 ### Examples
 
@@ -354,6 +458,16 @@ npx tsx src/index.ts "Startup MVP" --marketplace --blueprint startup-cto --ident
 
 # All flags combined
 npx tsx src/index.ts "Recipe sharing platform" --dashboard --approve --refine --identity --governance --audit --security --memory
+
+# Self-evolving meta-loop: capture run signals and propose prompt/governance adjustments
+npx tsx src/index.ts "Fintech app" --meta=capture --refine
+
+# Let the meta-loop auto-apply improvements (requires AGENT_ORG_META_AUTO=1)
+AGENT_ORG_META_AUTO=1 npx tsx src/index.ts "SaaS platform" --meta=auto --refine
+
+# Check meta-loop status and sliding-window metrics
+npx tsx src/meta-cli.ts status
+npx tsx src/meta-cli.ts history --runs 20
 ```
 
 ### Help
@@ -564,10 +678,19 @@ outputs/
     ├── scheduler/scheduler-agent/output.md
     ├── workflow/workflow-agent/output.md
     └── monitoring/monitoring-agent/output.md
-└── linear/
-    └── mapper/
-        ├── output.md                      # Mapper agent output
-        └── linear-import.json             # Structured data for Linear sync
+├── linear/
+│   └── mapper/
+│       ├── output.md                      # Mapper agent output
+│       └── linear-import.json             # Structured data for Linear sync
+└── .meta/                                 # Self-evolving meta-loop (with --meta)
+    ├── config.json                        # User gates and configuration
+    ├── ledger.jsonl                       # Hash-chained audit of meta-loop actions
+    ├── runs.jsonl                         # Per-run summaries (all-time)
+    ├── pending-proposals.json             # Proposals awaiting human gate
+    ├── proposals/YYYY-MM-DD/<runId>.json  # Versioned proposal snapshots
+    ├── snapshots/                         # Before/after snapshots for rollback
+    ├── findings.jsonl                     # Stable findingId → acceptance status
+    └── rules/v1.json                      # Versioned proposer rule definitions
 ```
 
 ### project-plan.md
@@ -865,6 +988,9 @@ Agents that learn from past runs, build reputation, and accumulate organizationa
 ### 15. White-Label Deployment
 Customize branding, governance templates, and feature toggles for different organizations and industries.
 
+### 16. Self-Evolving Meta-Loop
+Each orchestration run becomes a learning signal for the next. The meta-loop observes cross-run patterns (recurring critiques, governance spikes, reputation trends) and proposes bounded, human-gated adjustments to prompts, governance policies, and CEO configuration — with snapshots and full rollback support.
+
 ---
 
 ## Project Structure
@@ -942,6 +1068,22 @@ agent-org/
 │   │   ├── agent-pack.ts         # Pre-built agent packs
 │   │   └── workflows.ts          # Reusable workflow templates
 │   │
+│   ├── meta-loop/                  # Self-evolving meta-loop
+│   │   ├── meta-orchestrator.ts   # 8-step controller (evaluateAndApply)
+│   │   ├── meta-config.ts         # Meta-loop configuration loader
+│   │   ├── run-collector.ts       # Signal collection from run outputs
+│   │   ├── aggregator.ts          # Sliding-window aggregation
+│   │   ├── proposer-rules.ts      # 7 pure proposer rules
+│   │   ├── finding-store.ts       # Stable findingId + acceptance tracking
+│   │   ├── version-store.ts       # Proposal write/apply/rollback with snapshots
+│   │   ├── ledger.ts              # Hash-chained append-only audit log
+│   │   ├── prompt-editor.ts       # Section-aware prompt edits
+│   │   ├── governance-editor.ts   # Single-level governance tuning
+│   │   ├── ceo-config-editor.ts   # One-lever CEO config changes
+│   │   └── index.ts               # Barrel export
+│   │
+│   ├── meta-cli.ts                # Standalone meta-loop CLI (status/rollback/history/config)
+│   │
 │   ├── prompts/
 │   │   ├── agent-prompts.ts      # All 26 system prompts (centralized)
 │   │   └── refinement-prompts.ts # Review and refinement prompt templates
@@ -996,8 +1138,23 @@ agent-org/
 │   ├── memory.test.ts            # Agent memory tests
 │   ├── templates.test.ts         # Template tests
 │   ├── marketplace.test.ts       # Marketplace tests
-│   └── dashboard-api.test.ts     # Dashboard API tests
-│                               # Total: 240 tests across 19 files
+│   ├── dashboard-api.test.ts     # Dashboard API tests
+│   ├── meta-types.test.ts        # Meta-loop type guards
+│   ├── meta-config.test.ts       # Meta-loop config loader
+│   ├── meta-collector.test.ts    # Signal collection
+│   ├── meta-aggregator.test.ts   # Sliding-window aggregation
+│   ├── meta-proposer.test.ts     # 7 proposer rules
+│   ├── meta-finding-store.test.ts # FindingId + acceptance tracking
+│   ├── meta-version-store.test.ts # Write/apply/rollback cycle
+│   ├── meta-ledger.test.ts       # Hash-chain verification
+│   ├── meta-prompt-editor.test.ts # Section-aware prompt edits
+│   ├── meta-governance-editor.test.ts # Governance tuning
+│   ├── meta-ceo-config-editor.test.ts # CEO config tuning
+│   ├── meta-orchestrator.test.ts # Full 8-step flow
+│   ├── meta-rollback.test.ts     # Rollback verification
+│   ├── meta-integration.test.ts  # Two-run proposal→apply cycle
+│   └── meta-e2e.test.ts          # --meta=auto end-to-end
+│                               # Total: 320 tests across 33 files
 │
 ├── outputs/                       # Agent-generated artifacts (gitignored)
 ├── dist/                          # Compiled JavaScript (build output)
@@ -1102,6 +1259,7 @@ The Trusted Execution Environment reported an invalid attestation. This is expec
 - [x] Enterprise onboarding — guided setup flow, compliance configuration
 - [x] White-label deployment — custom branding, feature toggles
 - [x] AI Organization Marketplace — blueprints, agent packs, workflow templates
+- [x] Self-evolving meta-loop — cross-run signal aggregation, 7 proposer rules, human-gated prompt/governance/CEO tuning with snapshots and rollback
 
 ---
 
