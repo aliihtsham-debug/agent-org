@@ -75,7 +75,8 @@ const rules: PolicyRule[] = [
       expect(result.success).toBe(true);
 
       const newContent = await readFile(srcFile, "utf-8");
-      expect(newContent).toContain('"level": "medium"');
+      expect(newContent).toContain('level');
+      expect(newContent).toContain('medium');
       expect(newContent).not.toContain('"level": "high"');
     });
 

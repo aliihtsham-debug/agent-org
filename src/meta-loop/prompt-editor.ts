@@ -136,7 +136,7 @@ function applySectionEdit(
 
   // Search for the section field within the role's range.
   // We look for the pattern: `<section>:` where section is the PromptConfig field.
-  const fieldPattern = new RegExp(`^\\s+${escapeRegex(section)}:\\s`);
+  const fieldPattern = new RegExp(String.raw`^\s+${escapeRegex(section)}:\s`);
   let fieldStart = -1;
 
   for (let i = roleStartLine; i <= (roleEndLine === -1 ? lines.length - 1 : roleEndLine); i++) {

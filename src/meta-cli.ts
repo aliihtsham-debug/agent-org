@@ -123,7 +123,8 @@ async function cmdHistory(outputBase: string, n: number) {
   if (Object.keys(window.pairWindows).length > 0) {
     console.log("\nPer-pair metrics:");
     for (const [pair, metrics] of Object.entries(window.pairWindows)) {
-      console.log(`  ${pair}: ${metrics.totalCritiques} critiques, severity trend: ${metrics.severityTrend > 0 ? "+" : ""}${metrics.severityTrend}`);
+      const sev = metrics.severityDistribution;
+      console.log(`  ${pair}: ${metrics.totalCritiques} critiques, critical: ${sev.critical}, high: ${sev.high}, fixAcceptance: ${(metrics.fixAcceptanceRate * 100).toFixed(0)}%`);
     }
   }
 }

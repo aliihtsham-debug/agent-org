@@ -39,11 +39,19 @@ export async function applyGovernanceEdit(
     };
 
     if (patch.strategy === "policy-rule" && patch.ruleId && patch.conditionType && patch.fromLevel && patch.toLevel) {
-      return applyPolicyRuleTuning(currentContent, patch.ruleId, patch.conditionType, patch.fromLevel, patch.toLevel);
+      const result = applyPolicyRuleTuning(currentContent, patch.ruleId, patch.conditionType, patch.fromLevel, patch.toLevel);
+      if (result.success && result.newContent) {
+        await writeFile(filePath, result.newContent, "utf-8");
+      }
+      return result;
     }
 
     if (patch.strategy === "approval-matrix" && patch.riskLevel && patch.fromApprovals !== undefined && patch.toApprovals !== undefined) {
-      return applyApprovalMatrixTuning(currentContent, patch.riskLevel, patch.fromApprovals, patch.toApprovals);
+      const result = applyApprovalMatrixTuning(currentContent, patch.riskLevel, patch.fromApprovals, patch.toApprovals);
+      if (result.success && result.newContent) {
+        await writeFile(filePath, result.newContent, "utf-8");
+      }
+      return result;
     }
 
     return { success: false, error: "Invalid governance patch format" };
@@ -57,25 +65,18 @@ export async function applyGovernanceEdit(
 
 /**
  * Adjust a condition level on a PolicyRule.
- *
- * Example: change `params: { level: "high" }` to `params: { level: "medium" }`
- * for a condition of type "risk_threshold" on a specific rule.
  */
-async function applyPolicyRuleTuning(
+function applyPolicyRuleTuning(
   content: string,
   ruleId: string,
   conditionType: string,
   fromLevel: string,
   toLevel: string,
-): Promise<{ success: boolean; newContent?: string; error?: string }> {
+): { success: boolean; newContent?: string; error?: string } {
   // Find the rule by ID.
   const ruleStart = content.indexOf(`id: "${ruleId}"`);
   if (ruleStart === -1) {
-    // Try alternate format.
-    const altStart = content.indexOf(`id: '${ruleId}'`);
-    if (altStart === -1) {
-      return { success: false, error: `PolicyRule with id "${ruleId}" not found` };
-    }
+    return { success: false, error: `PolicyRule with id "${ruleId}" not found` };
   }
 
   // Find the conditions array within this rule.
@@ -84,9 +85,11 @@ async function applyPolicyRuleTuning(
     return { success: false, error: `Rule ${ruleId} has no conditions array` };
   }
 
-  // Find the matching condition by type.
+  // Find the matching condition by type and level.
+  const escapedType = escapeRegex(conditionType);
+  const escapedLevel = escapeRegex(fromLevel);
   const conditionPattern = new RegExp(
-    `type:\\s*["']${escapeRegex(conditionType)}["'][\\s\\S]*?level:\\s*["']${escapeRegex(fromLevel)}["']`,
+    String.raw`type:\s*["']${escapedType}["'][\s\S]*?level:\s*["']${escapedLevel}["']`,
   );
 
   const match = conditionPattern.exec(content.slice(conditionsStart));
@@ -107,18 +110,16 @@ async function applyPolicyRuleTuning(
 
 /**
  * Adjust minApprovals for a risk level in the ApprovalMatrix.
- *
- * Example: change `critical: { ..., minApprovals: 2 }` to `minApprovals: 3`.
  */
-async function applyApprovalMatrixTuning(
+function applyApprovalMatrixTuning(
   content: string,
   riskLevel: RiskLevel,
   fromApprovals: number,
   toApprovals: number,
-): Promise<{ success: boolean; newContent?: string; error?: string }> {
+): { success: boolean; newContent?: string; error?: string } {
   // Find the risk level section in the ApprovalMatrix.
   const levelPattern = new RegExp(
-    `${riskLevel}:\\s*\\{[^}]*minApprovals:\\s*${fromApprovals}\\b`,
+    String.raw`${riskLevel}:\s*\{[^}]*minApprovals:\s*${fromApprovals}\b`,
     "s",
   );
 

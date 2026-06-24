@@ -60,7 +60,7 @@ export async function applyCEOConfigEdit(
     // Find the lever in the source code.
     // We look for patterns like `maxIterations: 1` or `minSeverity: "high"`.
     const leverPattern = new RegExp(
-      `(${escapeRegex(patch.lever)}\\s*:\\s*)${formatValuePattern(patch.fromValue)}`,
+      String.raw`(${escapeRegex(patch.lever)}\s*:\s*)${formatValuePattern(patch.fromValue)}`,
     );
 
     const match = leverPattern.exec(currentContent);
@@ -89,7 +89,7 @@ export async function applyCEOConfigEdit(
 
 function formatValuePattern(value: unknown): string {
   if (typeof value === "string") {
-    return `["']${escapeRegex(value)}["']`;
+    return String.raw`["']${escapeRegex(value)}["']`;
   }
   return String(value);
 }
