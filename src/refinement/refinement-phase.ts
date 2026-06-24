@@ -8,7 +8,7 @@ import type {
 import type { AgentContext } from "../agents/base-agent.js";
 import { runAgentWithRetry } from "../agents/base-agent.js";
 import { writeOutput, ensureDir } from "../tools/file-tools.js";
-import { parseCritique, extractJsonBlock } from "./critique-parser.js";
+import { parseCritique, extractJsonBlock, generateFindingId } from "./critique-parser.js";
 import { getReviewSystemPrompt, getReviewUserMessage, getRefinementSystemPrompt, getRefinementUserMessage } from "../prompts/refinement-prompts.js";
 import type { AgentResultsRegistry } from "../communication/results-registry.js";
 import { DEFAULT_REVIEW_PAIRS } from "./review-pairs.js";
@@ -106,6 +106,12 @@ export async function runRefinementPhase(
   }
 
   ctx.logger.info(`Refinement: ${refinements.size} agents refined`);
+
+  // ── Acceptance tracking: scan refinement output for findingId references ──
+  const addressedFindingIds = scanRefinementOutputForFindings(refinements, critiques);
+  if (addressedFindingIds.size > 0) {
+    ctx.logger.info(`Refinement: ${addressedFindingIds.size} finding(s) addressed in refinement`);
+  }
 
   return {
     critiques,
@@ -329,4 +335,68 @@ export async function writeRefinementSummary(
   }
 
   await writeOutput(`${summaryDir}/summary.md`, md);
+}
+
+/**
+ * Scan refinement output for findingId references.
+ *
+ * When a refinement agent incorporates a finding, it should reference the
+ * stable findingId in its output (finding:abc123def456]").
+ * This function scans refined outputs and returns the set of findingIds
+ * that were addressed.
+ *
+ * Returns a Set of findingId strings that were found in the refined output.
+ */
+function scanRefinementOutputForFindings(
+  refinements: Map<AgentRole, RefinementResult>,
+  critiques: CritiqueResult[],
+): Set<string> {
+  const addressed = new Set<string>();
+
+  // Collect all findingIds from the critiques.
+  const allFindingIds = new Set<string>();
+  for (const critique of critiques) {
+    if (critique.findingIds && critique.findingIds.length > 0) {
+      for (const id of critique.findingIds) {
+        allFindingIds.add(id);
+      }
+    }
+    // Also generate IDs from the findings text as fallback.
+    for (const finding of critique.findings) {
+      allFindingIds.add(generateFindingId(critique.reviewer, critique.reviewee, finding));
+    }
+  }
+
+  if (allFindingIds.size === 0) return addressed;
+
+  // Scan each refinement's output for findingId references.
+  for (const [, refinement] of refinements) {
+    const outputText = refinement.refinedResult.summary ?? "";
+
+    // Look for explicit findingId references: [finding:<hex>] pattern.
+    const findingRefPattern = /\[finding:([a-f0-9]{16})\]/g;
+    let match;
+    while ((match = findingRefPattern.exec(outputText)) !== null) {
+      const referencedId = match[1];
+      // Find the full ID that starts with this prefix.
+      for (const id of allFindingIds) {
+        if (id.startsWith(referencedId)) {
+          addressed.add(id);
+        }
+      }
+    }
+
+    // Also check for the full findingId directly mentioned.
+    for (const id of allFindingIds) {
+      if (outputText.includes(id)) {
+        addressed.add(id);
+      }
+    }
+
+    // Track addressed findings via the finding store (if available).
+    // The finding store is invoked via the orchestrator after refinement;
+    // this is a lightweight inline scan for immediate feedback.
+  }
+
+  return addressed;
 }

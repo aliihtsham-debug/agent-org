@@ -144,6 +144,12 @@ export interface CritiqueResult {
   critique: string;
   severity: "critical" | "high" | "medium" | "low" | "none";
   findings: string[];
+  /**
+   * Stable IDs for each finding (SHA-256 of reviewer+reviewee+findingText).
+   * Enables cross-run dedup and acceptance tracking.
+   * Added by the meta-loop's critique-parser enhancement.
+   */
+  findingIds?: string[];
 }
 
 /** Refinement result wrapping the improved output after incorporating critiques. */

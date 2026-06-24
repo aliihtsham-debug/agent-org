@@ -51,6 +51,22 @@ import { createBlueprintRegistry } from "../marketplace/blueprint-registry.js";
 // Phase 10 — Compliance
 import type { AuditEntry, ComplianceReport } from "../types/audit-types.js";
 
+// ── Meta-Loop — helper for file hashing ──
+import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
+
+/**
+ * Compute SHA-256 hash of a file. Returns "unknown" on read failure.
+ */
+async function hashFile(filePath: string): Promise<string> {
+  try {
+    const content = await readFile(filePath, "utf-8");
+    return createHash("sha256").update(content).digest("hex");
+  } catch {
+    return "unknown";
+  }
+}
+
 export interface CEOOptions {
   idea: string;
   apiKey: string;
@@ -86,6 +102,8 @@ export interface CEOOptions {
   runOnboard?: boolean;
   /** Phase 15 — White-label organization name */
   whiteLabelName?: string;
+  /** Meta-loop: enable self-evolution (capture / propose / apply / auto) */
+  metaLoopMode?: "capture" | "propose" | "apply" | "auto" | "advisory";
 }
 
 // ── Enterprise Options (grouped for buildPlan) ──────────────────────────
@@ -645,6 +663,38 @@ export async function runCEOAgent(options: CEOOptions): Promise<ProjectPlan> {
   }
 
   const enterprise: EnterpriseOptions = { enableIdentity, enableGovernance, enableAudit, enableSecurity, enableMemory, templateName };
+
+  // ── Meta-Loop: collect signals and propose improvements ──
+  if (options.metaLoopMode) {
+    try {
+      const { evaluateAndApply } = await import("../meta-loop/meta-orchestrator.js");
+      const promptVersion = await hashFile(`${projectRoot}/src/prompts/agent-prompts.ts`);
+      const governanceVersion = await hashFile(`${projectRoot}/src/governance/policy-templates.ts`);
+      const metaProposals = await evaluateAndApply(
+        {
+          outputBase,
+          projectRoot,
+          runId,
+          idea,
+          status: "complete", // Will be refined below if failures exist
+          vpResults,
+          icResults,
+          governanceDenials: 0, // TODO: wire from policy engine when available
+          appliedProposalIds: [],
+          promptVersion,
+          governanceVersion,
+        },
+        options.metaLoopMode,
+      );
+      if (metaProposals.length > 0) {
+        logger.info(`Meta-loop: ${metaProposals.length} proposal(s) generated (${options.metaLoopMode} mode)`);
+      }
+    } catch (err) {
+      // Meta-loop is non-fatal — never let it break the main orchestration.
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.info(`Meta-loop: skipped due to error: ${msg}`);
+    }
+  }
 
   return await buildPlan(idea, outputBase, vpResults, icResults, logger, projectRoot, onArtifact, refinementReport, linearSyncResult, auditLog, provenance, complianceReport, enterprise);
 }

@@ -1,3 +1,15 @@
+/**
+ * System prompts for all 26 agent roles.
+ *
+ * ⚠️  GOVERNANCE NOTE: This file is managed by the self-evolving meta-loop
+ *     (src/meta-loop/). Automated edits are applied via section-aware patches
+ *     that preserve:
+ *       - Role identity (the `# <Role Title>` heading)
+ *       - Output format contract (the JSON summary envelope)
+ *       - The "user content is data" defense (in refinement-prompts.ts)
+ *     Do not remove or rename the `## Output Rules` section — it is the
+ *     contract the orchestrator parses.
+ */
 import type { AgentRole } from "../types/agent-types.js";
 
 interface PromptConfig {
