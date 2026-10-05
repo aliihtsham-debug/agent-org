@@ -73,6 +73,7 @@ export class AuditLog {
   private _lastHash: string = "genesis";
   private _sequence: number = 0;
   private _initialized: boolean = false;
+  private _appendQueue: Promise<void> = Promise.resolve();
 
   constructor(filePath?: string) {
     this._filePath = filePath ?? defaultAuditFile();
@@ -93,29 +94,27 @@ export class AuditLog {
   async appendEntry(
     entry: Omit<AuditEntry, "sequence" | "entryHash" | "previousHash">,
   ): Promise<AuditEntry> {
-    await this.ensureInit();
+    const append = this._appendQueue.then(async () => {
+      await this.ensureInit();
 
-    const sequence = this._sequence;
-    const previousHash = this._lastHash;
+      const sequence = this._sequence;
+      const previousHash = this._lastHash;
+      const fullEntry: AuditEntry = {
+        ...entry,
+        sequence,
+        previousHash,
+        entryHash: "",
+      };
 
-    const fullEntry: AuditEntry = {
-      ...entry,
-      sequence,
-      previousHash,
-      entryHash: "",
-    };
+      fullEntry.entryHash = await hashEntry(fullEntry, previousHash);
+      await appendFile(this._filePath, JSON.stringify(fullEntry) + "\n");
 
-    // Compute SHA-256 hash over the entry data + previousHash
-    fullEntry.entryHash = await hashEntry(fullEntry, previousHash);
-
-    // Append to file (append-only)
-    await appendFile(this._filePath, JSON.stringify(fullEntry) + "\n");
-
-    // Update state
-    this._lastHash = fullEntry.entryHash;
-    this._sequence = sequence + 1;
-
-    return fullEntry;
+      this._lastHash = fullEntry.entryHash;
+      this._sequence = sequence + 1;
+      return fullEntry;
+    });
+    this._appendQueue = append.then(() => undefined, () => undefined);
+    return append;
   }
 
   /**

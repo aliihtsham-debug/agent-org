@@ -190,6 +190,57 @@ describe("Phase 10 — Enterprise Audit System", () => {
     }
   });
 
+  it("serializes concurrent appends into a valid hash chain", async () => {
+    const log = new AuditLog(TEST_AUDIT_FILE);
+    const entries = await Promise.all(Array.from({ length: 5 }, (_, i) =>
+      log.appendEntry({
+        agentDid: `did:agent:agent-${i}`,
+        action: "agent_output",
+        inputHash: `input-${i}`,
+        outputHash: `output-${i}`,
+        inputRef: `in-${i}`,
+        outputRef: `out-${i}`,
+        timestamp: new Date().toISOString(),
+        eventId: `evt-${i}`,
+        signature: `sig-${i}`,
+      }),
+    ));
+
+    expect(entries.map((entry) => entry.sequence)).toEqual([0, 1, 2, 3, 4]);
+    expect(entries.map((entry) => entry.eventId)).toEqual(["evt-0", "evt-1", "evt-2", "evt-3", "evt-4"]);
+    expect(entries[0].previousHash).toBe("genesis");
+    for (let i = 1; i < entries.length; i++) {
+      expect(entries[i].previousHash).toBe(entries[i - 1].entryHash);
+    }
+    expect(await log.getEntries()).toEqual(entries);
+    expect(await log.verifyChain()).toEqual({ valid: true, totalEntries: 5 });
+  });
+
+  it("continues appending after a rejected write", async () => {
+    const blockedDir = `${TEST_AUDIT_DIR}/blocked`;
+    await writeFile(blockedDir, "not a directory");
+    const log = new AuditLog(`${blockedDir}/audit-chain.jsonl`);
+    const input = {
+      agentDid: "did:agent:test",
+      action: "agent_output",
+      inputHash: "input",
+      outputHash: "output",
+      inputRef: "in",
+      outputRef: "out",
+      timestamp: new Date().toISOString(),
+      eventId: "evt-recovery",
+      signature: "sig",
+    };
+
+    await expect(log.appendEntry(input)).rejects.toThrow();
+    await rm(blockedDir);
+
+    const entry = await log.appendEntry(input);
+    expect(entry.sequence).toBe(0);
+    expect(entry.previousHash).toBe("genesis");
+    expect(await log.verifyChain()).toEqual({ valid: true, totalEntries: 1 });
+  });
+
   // ── 6. Provenance tracking: delegation chain ─────────────────────────
 
   it("6. provenance tracking: delegation chain", () => {
