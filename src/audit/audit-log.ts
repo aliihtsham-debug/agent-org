@@ -6,8 +6,9 @@
 // Storage: outputs/.audit/audit-chain.jsonl (append-only)
 // Hash = SHA-256(JSON.stringify(entry) + previousHash)
 
-import { appendFile, mkdir, readFile, access, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
+import { lock } from "proper-lockfile";
 import type { AuditEntry, AuditFilter, ChainVerificationResult } from "../types/audit-types.js";
 
 function defaultAuditFile(): string {
@@ -17,6 +18,11 @@ function defaultAuditFile(): string {
 
 async function ensureAuditDir(filePath: string): Promise<void> {
   await mkdir(dirname(filePath), { recursive: true });
+}
+
+async function ensureAuditFile(filePath: string): Promise<void> {
+  await ensureAuditDir(filePath);
+  await appendFile(filePath, "");
 }
 
 /**
@@ -44,28 +50,10 @@ async function hashEntry(entry: Omit<AuditEntry, "entryHash">, previousHash: str
   return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-async function getLastHash(filePath: string): Promise<string> {
-  try {
-    await access(filePath);
-    const content = await readFile(filePath, "utf-8");
-    const lines = content.trim().split("\n").filter(Boolean);
-    if (lines.length === 0) return "genesis";
-    const lastEntry = JSON.parse(lines[lines.length - 1]) as AuditEntry;
-    return lastEntry.entryHash;
-  } catch {
-    return "genesis";
-  }
-}
-
-async function getNextSequence(filePath: string): Promise<number> {
-  try {
-    await access(filePath);
-    const content = await readFile(filePath, "utf-8");
-    const lines = content.trim().split("\n").filter(Boolean);
-    return lines.length;
-  } catch {
-    return 0;
-  }
+async function readEntries(filePath: string): Promise<AuditEntry[]> {
+  const content = await readFile(filePath, "utf-8");
+  const lines = content.trim().split("\n").filter(Boolean);
+  return lines.map((line) => JSON.parse(line) as AuditEntry);
 }
 
 export class AuditLog {
