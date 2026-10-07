@@ -265,6 +265,21 @@ export async function runCEOAgent(options: CEOOptions): Promise<ProjectPlan> {
     enableWebTools: true,
     resultsRegistry: registry,
     messageBus: messageBus,
+    enterprise: {
+      enableIdentity,
+      enableGovernance,
+      enableAudit,
+      enableSecurity,
+      enableMemory,
+      enableMarketplace,
+      templateName,
+      agentIdentity: ceoIdentity ?? undefined,
+      agentKeyPair: ceoKeyPair ?? undefined,
+      auditLog: auditLog ?? undefined,
+      provenance: provenance ?? undefined,
+      policyEngine: policyEngine ?? undefined,
+      blueprint: selectedBlueprint ?? undefined,
+    },
   };
 
   // Gather web research ONCE at CEO level, then share across all agents to avoid

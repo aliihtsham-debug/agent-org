@@ -140,19 +140,13 @@ describe("Linear Sync", () => {
       },
     });
 
-    // Agent responses: 21 for pass 1, then mapper agent response
-    let callCount = 0;
-    mockCreate.mockImplementation(() => {
-      callCount++;
-      if (callCount <= 21) {
-        return mockSuccessfulResponse("Original output");
-      }
-      // Mapper agent response — produces linear-import.json
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: `# Linear Import
+    // Agent responses: return mapper JSON for all calls so every agent succeeds
+    // Regular agents will use default summary/artifacts; mapper extracts its JSON
+    mockCreate.mockResolvedValue({
+      content: [
+        {
+          type: "text" as const,
+          text: `# Linear Import
 
 \`\`\`json
 {
@@ -183,10 +177,18 @@ describe("Linear Sync", () => {
     }
   ],
   "metadata": {
-    "agentCount": 21,
+    "agentCount": 26,
     "tokenUsage": { "input": 50000, "output": 20000 },
     "durationMs": 15000,
     "timestamp": "2026-06-14T00:00:00.000Z",
+    "icSummaries": []
+  }
+}
+\`\`\``,
+        },
+      ],
+      usage: { input_tokens: 100, output_tokens: 200 },
+    });
     "icSummaries": [
       { "role": "pm", "summary": "Product strategy" },
       { "role": "cto", "summary": "Architecture" }
@@ -230,15 +232,17 @@ describe("Linear Sync", () => {
     let callCount = 0;
     mockCreate.mockImplementation(() => {
       callCount++;
-      if (callCount <= 21) {
+      // 26 agents total: CEO + 5 VPs + 2 Managers + 17 ICs + 1 Linear Mapper
+      // Return valid response for all agent calls; mapper gets the structured JSON
+      if (callCount <= 25) {
         return mockSuccessfulResponse("Original output");
       }
-      // Mapper agent response — produces linear-import.json
+      // Mapper agent response (call 26+) — produces linear-import.json
       return {
         content: [
           {
             type: "text" as const,
-            text: `# Linear Import\n\n\`\`\`json\n{"projectName": "Test product", "projectDescription": "Test", "labels": ["pm"], "cycles": [], "issues": [{"title": "Issue 1", "description": "Desc", "labels": ["pm"], "priority": "high"}], "metadata": {"agentCount": 21, "tokenUsage": {"input": 100, "output": 200}, "durationMs": 1000, "timestamp": "2026-06-14T00:00:00.000Z", "icSummaries": []}}\n\`\`\``,
+            text: `# Linear Import\n\n\`\`\`json\n{"projectName": "Test product", "projectDescription": "Test", "labels": ["pm"], "cycles": [], "issues": [{"title": "Issue 1", "description": "Desc", "labels": ["pm"], "priority": "high"}], "metadata": {"agentCount": 26, "tokenUsage": {"input": 100, "output": 200}, "durationMs": 1000, "timestamp": "2026-06-14T00:00:00.000Z", "icSummaries": []}}\n\`\`\``,
           },
         ],
         usage: { input_tokens: 100, output_tokens: 200 },
@@ -301,14 +305,16 @@ describe("Linear Sync", () => {
     let callCount = 0;
     mockCreate.mockImplementation(() => {
       callCount++;
-      if (callCount <= 21) {
+      // 26 agents total: CEO + 5 VPs + 2 Managers + 17 ICs + 1 Linear Mapper
+      if (callCount <= 25) {
         return mockSuccessfulResponse("Original output");
       }
+      // Mapper agent response (call 26+) — produces linear-import.json
       return {
         content: [
           {
             type: "text" as const,
-            text: `# Linear Import\n\n\`\`\`json\n{"projectName": "Test product", "projectDescription": "Test", "labels": ["pm"], "cycles": [], "issues": [{"title": "Issue 1", "description": "Desc", "labels": ["pm"], "priority": "high"}], "metadata": {"agentCount": 21, "tokenUsage": {"input": 100, "output": 200}, "durationMs": 1000, "timestamp": "2026-06-14T00:00:00.000Z", "icSummaries": []}}\n\`\`\``,
+            text: `# Linear Import\n\n\`\`\`json\n{"projectName": "Test product", "projectDescription": "Test", "labels": ["pm"], "cycles": [], "issues": [{"title": "Issue 1", "description": "Desc", "labels": ["pm"], "priority": "high"}], "metadata": {"agentCount": 26, "tokenUsage": {"input": 100, "output": 200}, "durationMs": 1000, "timestamp": "2026-06-14T00:00:00.000Z", "icSummaries": []}}\n\`\`\``,
           },
         ],
         usage: { input_tokens: 100, output_tokens: 200 },

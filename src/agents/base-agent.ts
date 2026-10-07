@@ -1,5 +1,10 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { AgentRole, AgentResult, TaskSpec } from "../types/agent-types.js";
+import type { AgentIdentity, AgentKeyPair } from "../types/identity-types.js";
+import type { AuditLog } from "../audit/audit-log.js";
+import type { ProvenanceTracker } from "../audit/provenance-tracker.js";
+import type { PolicyEngine } from "../governance/policy-engine.js";
+import type { OrganizationalBlueprint } from "../types/marketplace-types.js";
 import { getSystemPrompt } from "../prompts/agent-prompts.js";
 import { writeOutput, readFileIfExists, ensureDir } from "../tools/file-tools.js";
 import { AgentLogger } from "../observability/logger.js";
@@ -106,6 +111,22 @@ export interface AgentContext {
   webResearchContext?: string;
   runId: string;
   parentEventId?: string;
+  // Enterprise features (Phases 8-16)
+  enterprise?: {
+    enableIdentity: boolean;
+    enableGovernance: boolean;
+    enableAudit: boolean;
+    enableSecurity: boolean;
+    enableMemory: boolean;
+    enableMarketplace: boolean;
+    templateName: string;
+    agentIdentity?: AgentIdentity;
+    agentKeyPair?: AgentKeyPair;
+    auditLog?: AuditLog;
+    provenance?: ProvenanceTracker;
+    policyEngine?: PolicyEngine;
+    blueprint?: OrganizationalBlueprint;
+  };
 }
 
 export async function gatherWebResearch(topic: string): Promise<string> {
@@ -290,7 +311,7 @@ export async function runOrchestratorAgent(idea: string, ctx: AgentContext, conf
   if (overviewResult.status === "failed") return overviewResult;
   ctx.resultsRegistry.publish(overviewResult);
   const overviewSummary = ctx.resultsRegistry.getSummary(role) ?? overviewResult.summary;
-  const icCtx: AgentContext = { ...ctx, parentRole, enableWebTools: false };
+  const icCtx: AgentContext = { ...ctx, parentRole, enableWebTools: false, enterprise: ctx.enterprise };
   const icResults = await icSpawner(icCtx, overviewSummary);
   const failedICs = icResults.filter((r) => r.status === "failed");
   const succeededICs = icResults.filter((r) => r.status === "completed");
@@ -321,7 +342,7 @@ export async function runManagerOrchestratorAgent(idea: string, ctx: AgentContex
   if (overviewResult.status === "failed") return overviewResult;
   ctx.resultsRegistry.publish(overviewResult);
   const overviewSummary = ctx.resultsRegistry.getSummary(role) ?? overviewResult.summary;
-  const mgrCtx: AgentContext = { ...ctx, parentRole: role, enableWebTools: false };
+  const mgrCtx: AgentContext = { ...ctx, parentRole: role, enableWebTools: false, enterprise: ctx.enterprise };
   const managerResults = await managerSpawner(mgrCtx, overviewSummary);
   const icResults: AgentResult[] = managerResults.flatMap((m) => m.icResults ?? []);
   const failedICs = icResults.filter((r) => r.status === "failed");

@@ -6,7 +6,7 @@
 // Storage: outputs/.audit/audit-chain.jsonl (append-only)
 // Hash = SHA-256(JSON.stringify(entry) + previousHash)
 
-import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, writeFile, access } from "node:fs/promises";
 import { dirname } from "node:path";
 import { lock } from "proper-lockfile";
 import type { AuditEntry, AuditFilter, ChainVerificationResult } from "../types/audit-types.js";
@@ -54,6 +54,32 @@ async function readEntries(filePath: string): Promise<AuditEntry[]> {
   const content = await readFile(filePath, "utf-8");
   const lines = content.trim().split("\n").filter(Boolean);
   return lines.map((line) => JSON.parse(line) as AuditEntry);
+}
+
+async function getLastHash(filePath: string): Promise<string> {
+  try {
+    await access(filePath);
+    const content = await readFile(filePath, "utf-8");
+    const lines = content.trim().split("\n").filter(Boolean);
+    if (lines.length === 0) return "genesis";
+    const lastEntry = JSON.parse(lines[lines.length - 1]) as AuditEntry;
+    return lastEntry.entryHash;
+  } catch {
+    return "genesis";
+  }
+}
+
+async function getNextSequence(filePath: string): Promise<number> {
+  try {
+    await access(filePath);
+    const content = await readFile(filePath, "utf-8");
+    const lines = content.trim().split("\n").filter(Boolean);
+    if (lines.length === 0) return 0;
+    const lastEntry = JSON.parse(lines[lines.length - 1]) as AuditEntry;
+    return lastEntry.sequence + 1;
+  } catch {
+    return 0;
+  }
 }
 
 export class AuditLog {
