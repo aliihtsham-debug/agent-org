@@ -13,6 +13,13 @@ import type { AgentResultsRegistry } from "../communication/results-registry.js"
 import type { AgentMessageBus } from "../communication/message-bus.js";
 import { resolve, sep } from "node:path";
 import { Semaphore } from "../utils/semaphore.js";
+// Enterprise feature imports (used by withEnterpriseOrchestrator / withEnterpriseIC)
+import { createAgentIdentity, registerAgent, generateKeyPair } from "../identity/agent-identity.js";
+import { createDelegationCredential, verifyDelegation } from "../identity/delegation.js";
+import { assessRisk } from "../governance/risk-assessment.js";
+import { loadMemory, addEntry } from "../memory/agent-memory.js";
+import { recordEvent, calculateScore } from "../memory/reputation-tracker.js";
+import { ROLE_OUTPUT_DIR } from "../types/agent-types.js";
 
 // Shared Anthropic client instance
 let _sharedClient: Anthropic | null = null;
@@ -296,6 +303,7 @@ export interface ManagerOrchestratorConfig {
   outputPath: string;
   managerSpawner: (ctx: AgentContext, summary: string) => Promise<AgentResult[]>;
   summaryPrefix: string;
+  extraContext?: string;
 }
 
 export async function runOrchestratorAgent(idea: string, ctx: AgentContext, config: OrchestratorConfig): Promise<AgentResult> {
@@ -330,12 +338,12 @@ export async function runOrchestratorAgent(idea: string, ctx: AgentContext, conf
 }
 
 export async function runManagerOrchestratorAgent(idea: string, ctx: AgentContext, config: ManagerOrchestratorConfig): Promise<AgentResult> {
-  const { role, task, outputPath, managerSpawner, summaryPrefix } = config;
+  const { role, task, outputPath, managerSpawner, summaryPrefix, extraContext = "" } = config;
   const overviewSpec: TaskSpec = {
     id: role + "-arch-" + Date.now(),
     role,
     task: task + ": \"" + idea + "\"",
-    context: "",
+    context: extraContext,
     outputPath: ctx.outputBase + "/" + outputPath,
   };
   const overviewResult = await runAgentWithRetry(overviewSpec, ctx);
@@ -360,4 +368,316 @@ export async function runManagerOrchestratorAgent(idea: string, ctx: AgentContex
     error: failedICs.length > 0 ? "IC failures: " + failedICs.map((r) => r.role).join(", ") : undefined,
     icResults,
   };
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Shared Enterprise Helpers — eliminates ~2200 lines of duplicated boilerplate
+// ═══════════════════════════════════════════════════════════════════════
+
+export interface EnterpriseOrchestratorConfig {
+  role: AgentRole;
+  displayName: string;
+  riskLevel: "low" | "medium" | "high";
+  delegationDepth: number;
+  delegationFrom: string;
+  delegationPermissions: string[];
+  task: string;
+  outputPath: string;
+  spawner: (icCtx: AgentContext, summary: string) => Promise<AgentResult[]>;
+  summaryPrefix: string;
+  orchestratorType: "orchestrator" | "manager";
+  extraContext?: string;
+}
+
+export interface EnterpriseICConfig {
+  role: AgentRole;
+  displayName: string;
+  taskTemplate: string;
+  architectureSummary?: string;
+  productSummary?: string;
+  extraContext?: string;
+}
+
+/**
+ * Runs enterprise features (identity, governance, audit, memory, provenance, reputation)
+ * around an orchestrator agent (VP or Manager). Eliminates boilerplate duplication.
+ */
+export async function withEnterpriseOrchestrator(
+  idea: string,
+  ctx: AgentContext,
+  config: EnterpriseOrchestratorConfig
+): Promise<AgentResult> {
+  const enterprise = ctx.enterprise;
+  const now = new Date().toISOString();
+  const { role, displayName, riskLevel, delegationDepth, delegationFrom, delegationPermissions, task, outputPath, spawner, summaryPrefix, orchestratorType, extraContext = "" } = config;
+
+  // Phase 8: Create agent identity if enabled
+  let agentIdentity = null;
+  let agentKeyPair = null;
+  if (enterprise?.enableIdentity && enterprise.agentIdentity && enterprise.agentKeyPair) {
+    agentKeyPair = await generateKeyPair();
+    agentIdentity = await createAgentIdentity(role, displayName);
+    const registration = await registerAgent(agentIdentity);
+    ctx.logger.info(`${role} identity registered: ${registration.did}`);
+
+    // Create delegation credential: parent → agent
+    const delegation = await createDelegationCredential(enterprise.agentIdentity, agentIdentity.agentId, delegationPermissions, enterprise.agentKeyPair);
+    const isValid = await verifyDelegation(delegation);
+    ctx.logger.info(`Delegation ${delegationFrom} → ${role}: ${isValid ? "verified" : "FAILED"}`);
+  }
+
+  // Phase 9: Governance evaluation
+  if (enterprise?.enableGovernance && enterprise.policyEngine) {
+    const risk = assessRisk("spawn", { riskLevel, delegationDepth, timestamp: now });
+    const govCtx = { riskLevel: risk, delegationDepth, timestamp: now };
+    const decision = enterprise.policyEngine.evaluate(role, "spawn", govCtx);
+    ctx.logger.info(`${role} Governance evaluation: ${decision.effect} (risk: ${risk})`);
+
+    if (decision.effect === "deny") {
+      ctx.logger.info(`Governance policy denied ${role} actions — aborting`);
+      return {
+        role,
+        status: "failed",
+        outputPath: "",
+        summary: "Blocked by governance policy",
+        artifacts: [],
+        tokenUsage: { input: 0, output: 0 },
+        durationMs: 0,
+        error: "Governance deny",
+      };
+    }
+
+    if (enterprise.enableAudit && enterprise.auditLog && agentIdentity) {
+      await enterprise.auditLog.appendEntry({
+        agentDid: `did:agent:${agentIdentity.agentId}`,
+        action: "policy_eval",
+        inputHash: `risk:${risk}`,
+        outputHash: `decision:${decision.effect}`,
+        inputRef: "governance-eval",
+        outputRef: "governance-decision",
+        timestamp: now,
+        eventId: `audit-${Date.now()}`,
+        signature: "",
+      });
+    }
+  }
+
+  // Phase 12: Load agent memory if enabled
+  if (enterprise?.enableMemory) {
+    const agentMemory = await loadMemory(role);
+    if (agentMemory.entries.length > 0) {
+      ctx.logger.info(`${role} memory loaded: ${agentMemory.entries.length} entries`);
+    }
+  }
+
+  // Run the orchestrator
+  let result: AgentResult;
+  if (orchestratorType === "manager") {
+    result = await runManagerOrchestratorAgent(idea, ctx, {
+      role,
+      task,
+      outputPath,
+      managerSpawner: spawner,
+      summaryPrefix,
+      extraContext,
+    });
+  } else {
+    result = await runOrchestratorAgent(idea, ctx, {
+      role,
+      task,
+      outputPath,
+      icSpawner: spawner,
+      summaryPrefix,
+      extraContext,
+    });
+  }
+
+  // Phase 10: Audit - record completion
+  if (enterprise?.enableAudit && enterprise.auditLog && agentIdentity) {
+    await enterprise.auditLog.appendEntry({
+      agentDid: `did:agent:${agentIdentity.agentId}`,
+      action: result.status === "failed" ? "agent_fail" : "agent_complete",
+      inputHash: idea.slice(0, 64),
+      outputHash: result.summary.slice(0, 64),
+      inputRef: idea,
+      outputRef: result.outputPath,
+      timestamp: now,
+      eventId: `audit-${Date.now()}`,
+      signature: "",
+    });
+  }
+
+  // Phase 10: Provenance - track delegation to ICs
+  if (enterprise?.enableAudit && enterprise.provenance) {
+    if (result.icResults) {
+      for (const ic of result.icResults) {
+        enterprise.provenance.trackDelegation(role, ic.role, "spawn", idea);
+        if (ic.status === "completed" || ic.status === "partial") {
+          enterprise.provenance.trackOutput(ic.role, ic.outputPath, [idea]);
+        }
+      }
+    }
+  }
+
+  // Phase 12: Record reputation + save memory
+  if (enterprise?.enableMemory) {
+    const event = result.status === "completed"
+      ? { timestamp: now, projectId: ctx.runId, event: "completion" as const, delta: 5, details: `Completed: ${result.summary.slice(0, 80)}` }
+      : { timestamp: now, projectId: ctx.runId, event: "failure" as const, delta: -10, details: `Failed: ${result.error ?? "unknown"}` };
+    await recordEvent(role, event);
+    await addEntry(role, {
+      timestamp: now,
+      projectId: ctx.runId,
+      type: result.status === "completed" ? "outcome" : "lesson",
+      content: result.summary,
+      importance: result.status === "completed" ? 0.7 : 0.9,
+      tags: [role, result.status, enterprise.templateName ?? "default"],
+    });
+  }
+
+  // Add reputation score
+  if (enterprise?.enableMemory) {
+    const rep = await calculateScore(role);
+    result.reputationScore = rep.overall;
+  }
+
+  return result;
+}
+
+/**
+ * Runs enterprise features around an IC (leaf) agent.
+ */
+export async function withEnterpriseIC(
+  idea: string,
+  ctx: AgentContext,
+  config: EnterpriseICConfig
+): Promise<AgentResult> {
+  const enterprise = ctx.enterprise;
+  const now = new Date().toISOString();
+  const { role, displayName, taskTemplate, architectureSummary = "", productSummary = "", extraContext = "" } = config;
+
+  // Phase 8: Create IC identity if enabled
+  let icIdentity = null;
+  let icKeyPair = null;
+  if (enterprise?.enableIdentity && enterprise.agentIdentity && enterprise.agentKeyPair) {
+    icKeyPair = await generateKeyPair();
+    icIdentity = await createAgentIdentity(role, displayName);
+    const registration = await registerAgent(icIdentity);
+    ctx.logger.info(`${role} identity registered: ${registration.did}`);
+
+    // Create delegation credential: parent → IC
+    const delegation = await createDelegationCredential(enterprise.agentIdentity, icIdentity.agentId, ["write_file"], enterprise.agentKeyPair);
+    const isValid = await verifyDelegation(delegation);
+    ctx.logger.info(`Delegation ${ctx.parentRole} → ${role}: ${isValid ? "verified" : "FAILED"}`);
+  }
+
+  // Phase 9: Governance evaluation for IC actions
+  if (enterprise?.enableGovernance && enterprise.policyEngine) {
+    const risk = assessRisk("spawn", { riskLevel: "low", delegationDepth: 3, timestamp: now });
+    const govCtx = { riskLevel: risk, delegationDepth: 3, timestamp: now };
+    const decision = enterprise.policyEngine.evaluate(role, "spawn", govCtx);
+    ctx.logger.info(`${role} Governance evaluation: ${decision.effect} (risk: ${risk})`);
+
+    if (decision.effect === "deny") {
+      ctx.logger.info(`Governance policy denied ${role} actions — aborting`);
+      return {
+        role,
+        status: "failed",
+        outputPath: "",
+        summary: "Blocked by governance policy",
+        artifacts: [],
+        tokenUsage: { input: 0, output: 0 },
+        durationMs: 0,
+        error: "Governance deny",
+      };
+    }
+
+    if (enterprise.enableAudit && enterprise.auditLog && icIdentity) {
+      await enterprise.auditLog.appendEntry({
+        agentDid: `did:agent:${icIdentity.agentId}`,
+        action: "policy_eval",
+        inputHash: `risk:${risk}`,
+        outputHash: `decision:${decision.effect}`,
+        inputRef: "governance-eval",
+        outputRef: "governance-decision",
+        timestamp: now,
+        eventId: `audit-${Date.now()}`,
+        signature: "",
+      });
+    }
+  }
+
+  // Phase 12: Load IC memory if enabled
+  if (enterprise?.enableMemory) {
+    const icMemory = await loadMemory(role);
+    if (icMemory.entries.length > 0) {
+      ctx.logger.info(`${role} memory loaded: ${icMemory.entries.length} entries`);
+    }
+  }
+
+  // Build task spec
+  const subdir = ROLE_OUTPUT_DIR[role];
+  const outputPath = `${ctx.outputBase}/${subdir}/${role}`;
+  const task = `${taskTemplate}: "${idea}"`;
+
+  const contextParts = [
+    architectureSummary ? `## Architecture Summary\n${architectureSummary}` : "",
+    productSummary ? `## Product Summary\n${productSummary}` : "",
+    extraContext ? `## Additional Context\n${extraContext}` : "",
+  ].filter(Boolean);
+
+  const taskSpec: TaskSpec = {
+    id: `${role}-${Date.now()}`,
+    role,
+    task,
+    context: contextParts.join("\n\n"),
+    outputPath,
+  };
+
+  const result = await runAgentWithRetry(taskSpec, ctx);
+
+  // Phase 10: Audit - record IC completion
+  if (enterprise?.enableAudit && enterprise.auditLog && icIdentity) {
+    await enterprise.auditLog.appendEntry({
+      agentDid: `did:agent:${icIdentity.agentId}`,
+      action: result.status === "failed" ? "agent_fail" : "agent_complete",
+      inputHash: idea.slice(0, 64),
+      outputHash: result.summary.slice(0, 64),
+      inputRef: idea,
+      outputRef: result.outputPath,
+      timestamp: now,
+      eventId: `audit-${Date.now()}`,
+      signature: "",
+    });
+  }
+
+  // Phase 10: Provenance - track IC output
+  if (enterprise?.enableAudit && enterprise.provenance) {
+    if (result.status === "completed" || result.status === "partial") {
+      enterprise.provenance.trackOutput(role, result.outputPath, [idea]);
+    }
+  }
+
+  // Phase 12: Record reputation
+  if (enterprise?.enableMemory) {
+    const event = result.status === "completed"
+      ? { timestamp: now, projectId: ctx.runId, event: "completion" as const, delta: 5, details: `Completed: ${result.summary.slice(0, 80)}` }
+      : { timestamp: now, projectId: ctx.runId, event: "failure" as const, delta: -10, details: `Failed: ${result.error ?? "unknown"}` };
+    await recordEvent(role, event);
+  }
+
+  // Add reputation score
+  if (enterprise?.enableMemory) {
+    const rep = await calculateScore(role);
+    result.reputationScore = rep.overall;
+  }
+
+  // Publish to registry so sibling and cross-branch agents can access this result.
+  try {
+    ctx.resultsRegistry.publish(result);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    ctx.logger.info(`${role} registry publish failed: ${msg}`);
+  }
+  return result;
 }

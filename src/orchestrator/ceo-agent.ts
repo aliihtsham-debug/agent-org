@@ -569,31 +569,64 @@ export async function runCEOAgent(options: CEOOptions): Promise<ProjectPlan> {
         const mapperResult = await runLinearMapper(idea, ctx, registry);
 
         if (mapperResult.success && mapperResult.import) {
-          linearSyncResult = await syncToLinear({
-            apiKey: linearApiKey,
-            linearImport: mapperResult.import,
-            project: {
-              idea,
-              timestamp: now,
-              pmResult,
-              ctoResult,
-              cisoResult,
-              cfoResult,
-              cooResult,
-              icResults,
-              status: "complete",
-              gaps: [],
-            },
-            logger,
-            maxConcurrent: parseInt(process.env.LINEAR_MAX_CONCURRENT ?? "3", 10),
-          });
-          logger.info(`Linear sync: ${linearSyncResult.created} created, ${linearSyncResult.skipped} skipped`);
+          try {
+            linearSyncResult = await syncToLinear({
+              apiKey: linearApiKey,
+              linearImport: mapperResult.import,
+              project: {
+                idea,
+                timestamp: now,
+                pmResult,
+                ctoResult,
+                cisoResult,
+                cfoResult,
+                cooResult,
+                icResults,
+                status: "complete",
+                gaps: [],
+              },
+              logger,
+              maxConcurrent: parseInt(process.env.LINEAR_MAX_CONCURRENT ?? "3", 10),
+            });
+            logger.info(`Linear sync: ${linearSyncResult.created} created, ${linearSyncResult.skipped} skipped`);
+          } catch (syncErr) {
+            // Ensure linearSyncResult is always defined even if syncToLinear throws unexpectedly
+            const msg = syncErr instanceof Error ? syncErr.message : String(syncErr);
+            logger.info(`Linear sync error (non-fatal): ${msg}`);
+            linearSyncResult = {
+              projectUrl: null,
+              issueUrls: [],
+              cycleUrls: [],
+              labelIds: [],
+              created: 0,
+              skipped: 0,
+              errors: [msg],
+            };
+          }
         } else {
           logger.info(`Linear sync skipped: mapper failed — ${mapperResult.error ?? "unknown error"}`);
+          linearSyncResult = {
+            projectUrl: null,
+            issueUrls: [],
+            cycleUrls: [],
+            labelIds: [],
+            created: 0,
+            skipped: 0,
+            errors: [mapperResult.error ?? "mapper failed"],
+          };
         }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         logger.info(`Linear sync failed (non-fatal): ${msg}`);
+        linearSyncResult = {
+          projectUrl: null,
+          issueUrls: [],
+          cycleUrls: [],
+          labelIds: [],
+          created: 0,
+          skipped: 0,
+          errors: [msg],
+        };
       }
     }
   }
