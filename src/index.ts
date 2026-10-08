@@ -37,6 +37,11 @@ Options:
   --onboard           Run enterprise onboarding flow (Phase 15)
   --white-label <name>  Configure white-label deployment (Phase 15)
   --full-enterprise   Enable all enterprise phases (8-16) at once
+  --meta-mode <mode>  Meta-loop mode: advisory|capture|propose|apply|auto
+  --meta-window <n>   Meta-loop window size (default: 5)
+  --meta-confidence <n>  Meta-loop min confidence 0-1 (default: 0.7)
+  --meta-status       Show meta-loop status
+  --meta-rollback <id>  Rollback a proposal by ID
   --help, -h          Show this help
 
 Examples:
@@ -74,6 +79,11 @@ function parseArgs(argv: string[]): {
   blueprintId: string;
   runOnboard: boolean;
   whiteLabelName: string;
+  metaLoopMode: string;
+  metaWindowSize: number;
+  metaMinConfidence: number;
+  metaStatus: boolean;
+  metaRollback: string;
 } {
   let dashboard = false;
   let dashboardPort = 3001;
@@ -89,6 +99,11 @@ function parseArgs(argv: string[]): {
   let blueprintId = "";
   let runOnboard = false;
   let whiteLabelName = "";
+  let metaLoopMode = "";
+  let metaWindowSize = 5;
+  let metaMinConfidence = 0.7;
+  let metaStatus = false;
+  let metaRollback = "";
   const ideaParts: string[] = [];
 
   for (let i = 0; i < argv.length; i++) {
@@ -147,12 +162,38 @@ function parseArgs(argv: string[]): {
         whiteLabelName = next;
         i++;
       }
+    } else if (arg === "--meta-mode") {
+      const next = argv[i + 1];
+      if (next && !next.startsWith("--")) {
+        metaLoopMode = next;
+        i++;
+      }
+    } else if (arg === "--meta-window") {
+      const next = argv[i + 1];
+      if (next && /^\d+$/.test(next)) {
+        metaWindowSize = parseInt(next, 10);
+        i++;
+      }
+    } else if (arg === "--meta-confidence") {
+      const next = argv[i + 1];
+      if (next && !next.startsWith("--")) {
+        metaMinConfidence = parseFloat(next);
+        i++;
+      }
+    } else if (arg === "--meta-status") {
+      metaStatus = true;
+    } else if (arg === "--meta-rollback") {
+      const next = argv[i + 1];
+      if (next && !next.startsWith("--")) {
+        metaRollback = next;
+        i++;
+      }
     } else {
       ideaParts.push(arg);
     }
   }
 
-  return { idea: ideaParts.join(" "), dashboard, dashboardPort, enableApproval, enableRefinement, enableIdentity, enableGovernance, enableAudit, enableSecurity, enableMemory, enableMarketplace, templateName, blueprintId, runOnboard, whiteLabelName };
+  return { idea: ideaParts.join(" "), dashboard, dashboardPort, enableApproval, enableRefinement, enableIdentity, enableGovernance, enableAudit, enableSecurity, enableMemory, enableMarketplace, templateName, blueprintId, runOnboard, whiteLabelName, metaLoopMode, metaWindowSize, metaMinConfidence, metaStatus, metaRollback };
 }
 
 async function main(): Promise<void> {
@@ -249,7 +290,7 @@ async function main(): Promise<void> {
     await saveMetaConfig(outputBase, {
       ...config,
       enabled: true,
-      mode: metaLoopMode,
+      mode: metaLoopMode as "advisory" | "capture" | "propose" | "apply" | "auto",
       windowSize: metaWindowSize,
       minConfidence: metaMinConfidence,
     });
@@ -275,7 +316,7 @@ async function main(): Promise<void> {
     blueprintId,
     runOnboard,
     whiteLabelName,
-    metaLoopMode,
+    metaLoopMode: metaLoopMode as "advisory" | "capture" | "propose" | "apply" | "auto" | undefined,
   });
 
   process.exit(plan.status === "failed" ? 1 : 0);

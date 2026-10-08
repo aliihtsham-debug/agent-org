@@ -118,7 +118,7 @@ interface EnterpriseOptions {
 }
 
 export async function runCEOAgent(options: CEOOptions): Promise<ProjectPlan> {
-  const { idea, apiKey, baseURL, outputBase, logger, projectRoot, enableApproval = false, enableRefinement = false, linearApiKey, enableIdentity = false, enableGovernance = false, enableAudit = false, enableSecurity = false, enableMemory = false, enableMarketplace = false, templateName = "default", blueprintId = "", runOnboard = false, whiteLabelName = "" } = options;
+  const { idea, apiKey, baseURL, outputBase, logger, projectRoot, enableApproval = false, enableRefinement = false, linearApiKey, enableIdentity = false, enableGovernance = false, enableAudit = false, enableSecurity = false, enableMemory = false, enableMarketplace = false, templateName = "default", blueprintId = "", runOnboard = false, whiteLabelName = "", metaLoopMode } = options;
 
   // Capture a single timestamp for consistency across the run
   const now = new Date().toISOString();
