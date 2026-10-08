@@ -39,16 +39,19 @@ const mockTeams = vi.fn();
 const mockProjects = vi.fn();
 const mockIssueLabels = vi.fn();
 
+// Use a class that can be instantiated with `new`
+class MockLinearClient {
+  teams = mockTeams;
+  projects = mockProjects;
+  issueLabels = mockIssueLabels;
+  createIssue = mockCreateIssue;
+  createProject = mockCreateProject;
+  createCycle = mockCreateCycle;
+  createIssueLabel = mockCreateIssueLabel;
+}
+
 vi.mock("@linear/sdk", () => ({
-  LinearClient: vi.fn().mockImplementation(() => ({
-    teams: mockTeams,
-    projects: mockProjects,
-    issueLabels: mockIssueLabels,
-    createIssue: mockCreateIssue,
-    createProject: mockCreateProject,
-    createCycle: mockCreateCycle,
-    createIssueLabel: mockCreateIssueLabel,
-  })),
+  LinearClient: MockLinearClient,
 }));
 
 const TEST_OUTPUT_BASE = join(__dirname, "..", "outputs-test-linear");
@@ -202,9 +205,16 @@ describe("Linear Sync", () => {
       },
     });
 
-    // Agent responses: return mapper JSON for all calls so every agent succeeds
-    // Regular agents will use default summary/artifacts; mapper extracts its JSON
-    mockCreate.mockResolvedValue(mockMapperResponse());
+    // Agent responses: regular agents (first ~21 calls) get simple success,
+    // mapper agent (call 22+) gets the full Linear import JSON
+    let callCount = 0;
+    mockCreate.mockImplementation(() => {
+      callCount++;
+      if (callCount <= 21) {
+        return mockSuccessfulResponse("Original output");
+      }
+      return mockMapperResponse();
+    });
 
     const { runCEOAgent } = await import("../src/orchestrator/ceo-agent.js");
     const { AgentLogger } = await import("../src/observability/logger.js");
@@ -233,8 +243,16 @@ describe("Linear Sync", () => {
   it("should handle Linear API errors gracefully", async () => {
     mockTeams.mockRejectedValue(new Error("Invalid API key"));
 
-    // Agent responses: return mapper JSON for all calls so every agent succeeds
-    mockCreate.mockResolvedValue(mockSimpleMapperResponse());
+    // Agent responses: regular agents (first ~21 calls) get simple success,
+    // mapper agent (call 22+) gets the simple Linear import JSON
+    let callCount = 0;
+    mockCreate.mockImplementation(() => {
+      callCount++;
+      if (callCount <= 21) {
+        return mockSuccessfulResponse("Original output");
+      }
+      return mockSimpleMapperResponse();
+    });
 
     const { runCEOAgent } = await import("../src/orchestrator/ceo-agent.js");
     const { AgentLogger } = await import("../src/observability/logger.js");
@@ -289,8 +307,16 @@ describe("Linear Sync", () => {
       },
     });
 
-    // Agent responses: return mapper JSON for all calls so every agent succeeds
-    mockCreate.mockResolvedValue(mockSimpleMapperResponse());
+    // Agent responses: regular agents (first ~21 calls) get simple success,
+    // mapper agent (call 22+) gets the simple Linear import JSON
+    let callCount = 0;
+    mockCreate.mockImplementation(() => {
+      callCount++;
+      if (callCount <= 21) {
+        return mockSuccessfulResponse("Original output");
+      }
+      return mockSimpleMapperResponse();
+    });
 
     const { runCEOAgent } = await import("../src/orchestrator/ceo-agent.js");
     const { AgentLogger } = await import("../src/observability/logger.js");

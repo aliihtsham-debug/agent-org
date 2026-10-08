@@ -39,16 +39,19 @@ const mockTeams = vi.fn();
 const mockProjects = vi.fn();
 const mockIssueLabels = vi.fn();
 
+// Use a class that can be instantiated with `new`
+class MockLinearClient {
+  teams = mockTeams;
+  projects = mockProjects;
+  issueLabels = mockIssueLabels;
+  createIssue = mockCreateIssue;
+  createProject = mockCreateProject;
+  createCycle = mockCreateCycle;
+  createIssueLabel = mockCreateIssueLabel;
+}
+
 vi.mock("@linear/sdk", () => ({
-  LinearClient: vi.fn().mockImplementation(() => ({
-    teams: mockTeams,
-    projects: mockProjects,
-    issueLabels: mockIssueLabels,
-    createIssue: mockCreateIssue,
-    createProject: mockCreateProject,
-    createCycle: mockCreateCycle,
-    createIssueLabel: mockCreateIssueLabel,
-  })),
+  LinearClient: MockLinearClient,
 }));
 
 const TEST_OUTPUT_BASE = join(__dirname, "..", "outputs-test-linear-edge");
@@ -129,8 +132,9 @@ describe("Linear Mapper Edge Cases", () => {
 
     // Should still complete — Linear sync is non-fatal
     expect(["complete", "partial"]).toContain(plan.status);
-    // Linear sync should be undefined since mapper failed
-    expect(plan.linearSync).toBeUndefined();
+    // Linear sync should have errors since mapper failed
+    expect(plan.linearSync).toBeDefined();
+    expect(plan.linearSync!.errors.length).toBeGreaterThan(0);
   });
 
   it("should handle mapper agent failing entirely", async () => {
@@ -176,7 +180,8 @@ describe("Linear Mapper Edge Cases", () => {
 
     // Should still complete — Linear sync is non-fatal
     expect(["complete", "partial"]).toContain(plan.status);
-    expect(plan.linearSync).toBeUndefined();
+    expect(plan.linearSync).toBeDefined();
+    expect(plan.linearSync!.errors.length).toBeGreaterThan(0);
   });
 
   it("should handle Linear API returning no teams", async () => {
