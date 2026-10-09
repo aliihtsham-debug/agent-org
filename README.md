@@ -108,16 +108,6 @@ flowchart TD
 3. Each VP produces their own strategy/overview, then spawns their IC sub-agents in parallel.
 4. Each **IC Agent** reads the parent's summary for context and produces its deliverable.
 5. All agents write markdown artifacts to `outputs/` on disk (artifact-based communication).
-5. The **CEO Agent** collects all results, commits each agent's artifacts to a role-specific git branch, and pushes + opens PRs.
-6. The unified project plan is written to `outputs/project-plan.md` + `outputs/project-plan.json`.
-
-### Execution Flow
-
-1. **You run the CLI** with a product idea string.
-2. The **CEO Agent** spawns 5 VPs in parallel: PM, CTO, CISO, CFO, COO (`Promise.allSettled`).
-3. Each VP produces their own strategy/overview, then spawns their IC sub-agents in parallel.
-4. Each **IC Agent** reads the parent's summary for context and produces its deliverable.
-5. All agents write markdown artifacts to `outputs/` on disk (artifact-based communication).
 6. The **CEO Agent** collects all results, commits each agent's artifacts to a role-specific git branch, and pushes + opens PRs.
 7. The unified project plan is written to `outputs/project-plan.md` + `outputs/project-plan.json`.
 
